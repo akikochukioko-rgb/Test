@@ -22,12 +22,11 @@ enum class AppThemeMode {
             DARK -> "dark"
         }
 
-    val labelRu: String
-        get() = when (this) {
-            SYSTEM -> "Как в системе"
-            LIGHT -> "Светлая"
-            DARK -> "Тёмная"
-        }
+    fun label(): String = when (this) {
+        SYSTEM -> AppStrings.t("theme_system")
+        LIGHT -> AppStrings.t("theme_light")
+        DARK -> AppStrings.t("theme_dark")
+    }
 }
 
 object ThemePrefs {
