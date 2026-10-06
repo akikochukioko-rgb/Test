@@ -16,7 +16,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -29,11 +31,13 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 
@@ -46,6 +50,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AppStrings.lang = LangPrefs.load(this)
         try {
             if (savedInstanceState == null) requestPermissionsAtStart()
         } catch (t: Throwable) {
@@ -53,7 +58,8 @@ class MainActivity : ComponentActivity() {
         }
         setContent {
             var themeMode by remember { mutableStateOf(ThemePrefs.load(this@MainActivity)) }
-            // First launch forces settings; later opened via gear icon
+            var lang by remember { mutableStateOf(LangPrefs.load(this@MainActivity)) }
+            var langTick by remember { mutableIntStateOf(0) }
             var showSettings by remember {
                 mutableStateOf(!ThemePrefs.isChosen(this@MainActivity))
             }
@@ -65,7 +71,6 @@ class MainActivity : ComponentActivity() {
                 AppThemeMode.DARK -> true
                 AppThemeMode.SYSTEM -> systemDark
             }
-
             val scheme = when {
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
                     if (useDark) dynamicDarkColorScheme(this@MainActivity)
@@ -77,15 +82,23 @@ class MainActivity : ComponentActivity() {
 
             MaterialTheme(colorScheme = scheme) {
                 RadioApp(
-                    onOpenSettings = { showSettings = true }
+                    onOpenSettings = { showSettings = true },
+                    langTick = langTick
                 )
                 if (showSettings) {
                     SettingsDialog(
                         themeMode = themeMode,
+                        lang = lang,
                         requireThemeChoice = firstRun && !ThemePrefs.isChosen(this@MainActivity),
                         onThemeSelected = { mode ->
                             ThemePrefs.save(this@MainActivity, mode)
                             themeMode = mode
+                        },
+                        onLangSelected = { l ->
+                            LangPrefs.save(this@MainActivity, l)
+                            AppStrings.lang = l
+                            lang = l
+                            langTick++
                         },
                         onDismiss = {
                             if (ThemePrefs.isChosen(this@MainActivity)) {
@@ -106,11 +119,8 @@ class MainActivity : ComponentActivity() {
         } else {
             perms += Manifest.permission.READ_EXTERNAL_STORAGE
         }
-        if (perms.isNotEmpty()) {
-            photoPermLauncher.launch(perms.toTypedArray())
-        } else {
-            requestAllFilesAccessSafely()
-        }
+        if (perms.isNotEmpty()) photoPermLauncher.launch(perms.toTypedArray())
+        else requestAllFilesAccessSafely()
     }
 
     private fun requestAllFilesAccessSafely() {
@@ -135,22 +145,27 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun SettingsDialog(
     themeMode: AppThemeMode,
+    lang: AppLang,
     requireThemeChoice: Boolean,
     onThemeSelected: (AppThemeMode) -> Unit,
+    onLangSelected: (AppLang) -> Unit,
     onDismiss: () -> Unit
 ) {
     AlertDialog(
         onDismissRequest = { if (!requireThemeChoice) onDismiss() },
-        title = { Text("Настройки") },
+        title = { Text(AppStrings.t("settings")) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(
+                Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 Text(
-                    "Тема оформления",
+                    AppStrings.t("theme_section"),
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.primary
                 )
                 Text(
-                    "Можно сменить в любой момент через иконку ⚙",
+                    AppStrings.t("theme_hint"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -172,7 +187,38 @@ private fun SettingsDialog(
                             onClick = { onThemeSelected(mode) }
                         )
                         Text(
-                            mode.labelRu,
+                            mode.label(),
+                            modifier = Modifier.padding(start = 8.dp),
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                    }
+                }
+
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                Text(
+                    AppStrings.t("lang_section"),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                AppLang.entries.forEach { l ->
+                    val label = if (l == AppLang.RU) AppStrings.t("lang_ru") else AppStrings.t("lang_en")
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .selectable(
+                                selected = lang == l,
+                                onClick = { onLangSelected(l) },
+                                role = Role.RadioButton
+                            )
+                            .padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = lang == l,
+                            onClick = { onLangSelected(l) }
+                        )
+                        Text(
+                            label,
                             modifier = Modifier.padding(start = 8.dp),
                             style = MaterialTheme.typography.bodyLarge
                         )
@@ -181,13 +227,15 @@ private fun SettingsDialog(
             }
         },
         confirmButton = {
+            val ctx = LocalContext.current
             TextButton(
-                enabled = !requireThemeChoice || ThemePrefs.isChosen(
-                    androidx.compose.ui.platform.LocalContext.current
-                ),
+                enabled = !requireThemeChoice || ThemePrefs.isChosen(ctx),
                 onClick = onDismiss
             ) {
-                Text(if (requireThemeChoice) "Готово" else "Закрыть")
+                Text(
+                    if (requireThemeChoice) AppStrings.t("done")
+                    else AppStrings.t("close")
+                )
             }
         }
     )
