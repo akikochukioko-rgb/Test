@@ -4,6 +4,8 @@ import android.content.ComponentName
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -41,7 +43,30 @@ private fun iconModel(icon: String?): Any? =
         else -> File(icon)
     }
 
-@OptIn(ExperimentalMaterial3Api::class)
+/** Build "Artist — Title" (or single part) from Media3 / ICY metadata. */
+private fun formatNowPlaying(meta: MediaMetadata, stationName: String?): String? {
+    val title = meta.title?.toString()?.trim().orEmpty()
+        .ifEmpty { meta.displayTitle?.toString()?.trim().orEmpty() }
+    val artist = meta.artist?.toString()?.trim().orEmpty()
+        .ifEmpty { meta.albumArtist?.toString()?.trim().orEmpty() }
+    val subtitle = meta.subtitle?.toString()?.trim().orEmpty()
+
+    val track = when {
+        artist.isNotEmpty() && title.isNotEmpty() &&
+            !title.equals(artist, ignoreCase = true) -> "$artist — $title"
+        title.isNotEmpty() -> title
+        artist.isNotEmpty() -> artist
+        subtitle.isNotEmpty() -> subtitle
+        else -> null
+    } ?: return null
+
+    // Ignore placeholder we set ourselves (station name / "Radio")
+    if (stationName != null && track.equals(stationName, ignoreCase = true)) return null
+    if (track.equals("Radio", ignoreCase = true)) return null
+    return track
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun RadioApp() {
     val ctx = LocalContext.current
@@ -52,6 +77,7 @@ fun RadioApp() {
     var currentId by remember { mutableStateOf<String?>(null) }
     var isPlaying by remember { mutableStateOf(false) }
     var buffering by remember { mutableStateOf(false) }
+    var nowPlaying by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var statusMsg by remember { mutableStateOf<String?>(null) }
 
@@ -114,12 +140,21 @@ fun RadioApp() {
 
             override fun onPlaybackStateChanged(state: Int) {
                 buffering = state == Player.STATE_BUFFERING
-                if (state == Player.STATE_IDLE || state == Player.STATE_ENDED) currentId = null
+                if (state == Player.STATE_IDLE || state == Player.STATE_ENDED) {
+                    currentId = null
+                    nowPlaying = null
+                }
+            }
+
+            override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
+                val stationName = stations.find { it.id == currentId }?.name
+                nowPlaying = formatNowPlaying(mediaMetadata, stationName)
             }
 
             override fun onPlayerError(e: PlaybackException) {
                 error = e.message ?: "Ошибка воспроизведения"
                 currentId = null
+                nowPlaying = null
             }
         }
         c.addListener(listener)
@@ -133,6 +168,7 @@ fun RadioApp() {
             if (c.isPlaying) c.pause() else c.play()
             return
         }
+        nowPlaying = null
         val meta = MediaMetadata.Builder().setTitle(s.name).setArtist("Radio").apply {
             when (val m = iconModel(s.icon)) {
                 is String -> setArtworkUri(Uri.parse(m))
@@ -263,15 +299,31 @@ fun RadioApp() {
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
+                                    val line = when {
+                                        active && buffering -> "Буферизация…"
+                                        active && isPlaying -> {
+                                            val track = nowPlaying
+                                            if (track.isNullOrBlank()) "Играет"
+                                            else "Играет: $track"
+                                        }
+                                        else -> s.streamUrl
+                                    }
+                                    val marquee = active && isPlaying && !nowPlaying.isNullOrBlank()
                                     Text(
-                                        when {
-                                            active && buffering -> "Буферизация…"
-                                            active && isPlaying -> "Играет"
-                                            else -> s.streamUrl
-                                        },
+                                        line,
                                         style = MaterialTheme.typography.bodySmall,
                                         maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
+                                        overflow = if (marquee) TextOverflow.Visible else TextOverflow.Ellipsis,
+                                        modifier = if (marquee) {
+                                            Modifier
+                                                .fillMaxWidth()
+                                                .basicMarquee(
+                                                    iterations = Int.MAX_VALUE,
+                                                    velocity = 40.dp
+                                                )
+                                        } else {
+                                            Modifier
+                                        }
                                     )
                                 }
                                 Text(
@@ -289,6 +341,7 @@ fun RadioApp() {
                                     if (currentId == s.id) {
                                         controller?.stop()
                                         currentId = null
+                                        nowPlaying = null
                                     }
                                     store.deleteIconFile(s.icon)
                                     stations.remove(s)
