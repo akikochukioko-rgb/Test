@@ -13,6 +13,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -52,16 +53,51 @@ fun RadioApp() {
     var isPlaying by remember { mutableStateOf(false) }
     var buffering by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var statusMsg by remember { mutableStateOf<String?>(null) }
 
     var editing by remember { mutableStateOf<Station?>(null) }
     var showDialog by remember { mutableStateOf(false) }
+    var menuExpanded by remember { mutableStateOf(false) }
+
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val imported = store.readImport(uri)
+        if (imported.isEmpty()) {
+            error = "Не удалось импортировать станции (пустой или неверный JSON)"
+            statusMsg = null
+            return@rememberLauncherForActivityResult
+        }
+        val merged = store.mergeImported(stations.toList(), imported)
+        val added = merged.size - stations.size
+        stations.clear()
+        stations.addAll(merged)
+        store.save(stations)
+        error = null
+        statusMsg = if (added > 0) "Импортировано новых: $added (всего: ${stations.size})"
+        else "Все станции из файла уже есть в списке"
+    }
+
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val ok = store.writeExport(uri, stations.toList())
+        error = null
+        statusMsg = if (ok) "Экспортировано станций: ${stations.size}"
+        else "Ошибка записи файла экспорта"
+    }
 
     DisposableEffect(Unit) {
         val future = MediaController.Builder(
             ctx, SessionToken(ctx, ComponentName(ctx, PlaybackService::class.java))
         ).buildAsync()
         future.addListener({
-            try { controller = future.get() } catch (_: Exception) {}
+            try {
+                controller = future.get()
+            } catch (_: Exception) {
+            }
         }, ContextCompat.getMainExecutor(ctx))
         onDispose {
             controller?.release()
@@ -72,11 +108,15 @@ fun RadioApp() {
     LaunchedEffect(controller) {
         val c = controller ?: return@LaunchedEffect
         val listener = object : Player.Listener {
-            override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
+            override fun onIsPlayingChanged(playing: Boolean) {
+                isPlaying = playing
+            }
+
             override fun onPlaybackStateChanged(state: Int) {
                 buffering = state == Player.STATE_BUFFERING
                 if (state == Player.STATE_IDLE || state == Player.STATE_ENDED) currentId = null
             }
+
             override fun onPlayerError(e: PlaybackException) {
                 error = e.message ?: "Ошибка воспроизведения"
                 currentId = null
@@ -88,79 +128,174 @@ fun RadioApp() {
     fun toggle(s: Station) {
         val c = controller ?: return
         error = null
+        statusMsg = null
         if (currentId == s.id) {
             if (c.isPlaying) c.pause() else c.play()
             return
         }
-        if (currentId == s.id && c.playbackState != Player.STATE_IDLE) { c.play(); return }
         val meta = MediaMetadata.Builder().setTitle(s.name).setArtist("Radio").apply {
             when (val m = iconModel(s.icon)) {
                 is String -> setArtworkUri(Uri.parse(m))
                 is File -> setArtworkUri(Uri.fromFile(m))
             }
         }.build()
-        c.setMediaItem(MediaItem.Builder().setMediaId(s.id).setUri(s.streamUrl).setMediaMetadata(meta).build())
-        c.prepare(); c.play()
+        c.setMediaItem(
+            MediaItem.Builder()
+                .setMediaId(s.id)
+                .setUri(s.streamUrl)
+                .setMediaMetadata(meta)
+                .build()
+        )
+        c.prepare()
+        c.play()
         currentId = s.id
     }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("Радио") }) },
+        topBar = {
+            TopAppBar(
+                title = { Text("Радио") },
+                actions = {
+                    Box {
+                        IconButton(onClick = { menuExpanded = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "Меню")
+                        }
+                        DropdownMenu(
+                            expanded = menuExpanded,
+                            onDismissRequest = { menuExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Импорт JSON") },
+                                onClick = {
+                                    menuExpanded = false
+                                    importLauncher.launch("application/json")
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Экспорт JSON") },
+                                onClick = {
+                                    menuExpanded = false
+                                    if (stations.isEmpty()) {
+                                        statusMsg = null
+                                        error = "Нечего экспортировать — список пуст"
+                                    } else {
+                                        exportLauncher.launch("radio_stations.json")
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+            )
+        },
         floatingActionButton = {
-            FloatingActionButton(onClick = { editing = null; showDialog = true }) {
+            FloatingActionButton(onClick = {
+                editing = null
+                showDialog = true
+            }) {
                 Icon(Icons.Default.Add, contentDescription = "Добавить станцию")
             }
         }
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize()) {
             error?.let {
-                Text(it, color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+                Text(
+                    it,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                )
+            }
+            statusMsg?.let {
+                Text(
+                    it,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                )
             }
             if (stations.isEmpty()) {
                 Box(Modifier.fillMaxSize(), Alignment.Center) {
-                    Text("Станций пока нет.\nНажмите «+», чтобы добавить свою.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        "Станций пока нет.\nНажмите «+» или импортируйте JSON.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
-            } else LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(stations, key = { it.id }) { s ->
-                    val active = currentId == s.id
-                    Card(
-                        modifier = Modifier.fillMaxWidth().clickable { toggle(s) },
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (active) MaterialTheme.colorScheme.primaryContainer
-                            else MaterialTheme.colorScheme.surfaceVariant)
-                    ) {
-                        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.size(56.dp).clip(RoundedCornerShape(12.dp))
-                                .then(Modifier), Alignment.Center) {
-                                val m = iconModel(s.icon)
-                                if (m != null) AsyncImage(m, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                                else Text("📻", fontSize = 28.sp)
-                            }
-                            Spacer(Modifier.width(12.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(s.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            } else {
+                LazyColumn(
+                    contentPadding = PaddingValues(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(stations, key = { it.id }) { s ->
+                        val active = currentId == s.id
+                        Card(
+                            modifier = Modifier.fillMaxWidth().clickable { toggle(s) },
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (active) MaterialTheme.colorScheme.primaryContainer
+                                else MaterialTheme.colorScheme.surfaceVariant
+                            )
+                        ) {
+                            Row(
+                                Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    Modifier
+                                        .size(56.dp)
+                                        .clip(RoundedCornerShape(12.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    val m = iconModel(s.icon)
+                                    if (m != null) {
+                                        AsyncImage(
+                                            m,
+                                            null,
+                                            Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    } else {
+                                        Text("📻", fontSize = 28.sp)
+                                    }
+                                }
+                                Spacer(Modifier.width(12.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        s.name,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        when {
+                                            active && buffering -> "Буферизация…"
+                                            active && isPlaying -> "Играет"
+                                            else -> s.streamUrl
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                                 Text(
-                                    when {
-                                        active && buffering -> "Буферизация…"
-                                        active && isPlaying -> "Играет"
-                                        else -> s.streamUrl
-                                    },
-                                    style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
-                            Text(if (active && (isPlaying || buffering)) "⏸" else "▶", fontSize = 26.sp,
-                                modifier = Modifier.padding(horizontal = 8.dp))
-                            IconButton(onClick = { editing = s; showDialog = true }) {
-                                Icon(Icons.Default.Edit, contentDescription = "Изменить")
-                            }
-                            IconButton(onClick = {
-                                if (currentId == s.id) { controller?.stop(); currentId = null }
-                                store.deleteIconFile(s.icon)
-                                stations.remove(s)
-                                store.save(stations)
-                            }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Удалить")
+                                    if (active && (isPlaying || buffering)) "⏸" else "▶",
+                                    fontSize = 26.sp,
+                                    modifier = Modifier.padding(horizontal = 8.dp)
+                                )
+                                IconButton(onClick = {
+                                    editing = s
+                                    showDialog = true
+                                }) {
+                                    Icon(Icons.Default.Edit, contentDescription = "Изменить")
+                                }
+                                IconButton(onClick = {
+                                    if (currentId == s.id) {
+                                        controller?.stop()
+                                        currentId = null
+                                    }
+                                    store.deleteIconFile(s.icon)
+                                    stations.remove(s)
+                                    store.save(stations)
+                                }) {
+                                    Icon(Icons.Default.Delete, contentDescription = "Удалить")
+                                }
                             }
                         }
                     }
@@ -185,15 +320,25 @@ fun RadioApp() {
 }
 
 @Composable
-private fun StationDialog(initial: Station?, store: StationStore, onDismiss: () -> Unit, onSave: (Station) -> Unit) {
+private fun StationDialog(
+    initial: Station?,
+    store: StationStore,
+    onDismiss: () -> Unit,
+    onSave: (Station) -> Unit
+) {
     var name by remember { mutableStateOf(initial?.name ?: "") }
     var url by remember { mutableStateOf(initial?.streamUrl ?: "") }
     var icon by remember { mutableStateOf(initial?.icon) }
-    var iconUrl by remember { mutableStateOf(initial?.icon?.takeIf { it.startsWith("http") } ?: "") }
+    var iconUrl by remember {
+        mutableStateOf(initial?.icon?.takeIf { it.startsWith("http") } ?: "")
+    }
     val oldIcon = initial?.icon
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) store.importIcon(uri)?.let { icon = it; iconUrl = "" }
+        if (uri != null) store.importIcon(uri)?.let {
+            icon = it
+            iconUrl = ""
+        }
     }
     val valid = url.trim().let { it.startsWith("http://") || it.startsWith("https://") }
 
@@ -202,29 +347,62 @@ private fun StationDialog(initial: Station?, store: StationStore, onDismiss: () 
         title = { Text(if (initial == null) "Новая станция" else "Изменить станцию") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(name, { name = it }, label = { Text("Название") }, singleLine = true)
-                OutlinedTextField(url, { url = it }, label = { Text("Ссылка на поток (mp3)") }, singleLine = true,
-                    isError = url.isNotBlank() && !valid)
-                OutlinedTextField(iconUrl, { iconUrl = it; icon = it.trim().ifBlank { null } },
-                    label = { Text("Ссылка на иконку (необязательно)") }, singleLine = true)
+                OutlinedTextField(
+                    name,
+                    { name = it },
+                    label = { Text("Название") },
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    url,
+                    { url = it },
+                    label = { Text("Ссылка на поток (mp3)") },
+                    singleLine = true,
+                    isError = url.isNotBlank() && !valid
+                )
+                OutlinedTextField(
+                    iconUrl,
+                    {
+                        iconUrl = it
+                        icon = it.trim().ifBlank { null }
+                    },
+                    label = { Text("Ссылка на иконку (необязательно)") },
+                    singleLine = true
+                )
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedButton(onClick = { picker.launch("image/*") }) { Text("Выбрать из файлов") }
+                    OutlinedButton(onClick = { picker.launch("image/*") }) {
+                        Text("Выбрать из файлов")
+                    }
                     Spacer(Modifier.width(12.dp))
                     iconModel(icon)?.let {
-                        AsyncImage(it, null, Modifier.size(48.dp).clip(RoundedCornerShape(10.dp)), contentScale = ContentScale.Crop)
+                        AsyncImage(
+                            it,
+                            null,
+                            Modifier.size(48.dp).clip(RoundedCornerShape(10.dp)),
+                            contentScale = ContentScale.Crop
+                        )
                     }
                 }
             }
         },
         confirmButton = {
-            TextButton(enabled = valid, onClick = {
-                if (oldIcon != null && oldIcon != icon) store.deleteIconFile(oldIcon)
-                onSave(Station(
-                    id = initial?.id ?: java.util.UUID.randomUUID().toString(),
-                    name = name.trim().ifBlank { url.trim() },
-                    streamUrl = url.trim(), icon = icon))
-            }) { Text("Сохранить") }
+            TextButton(
+                enabled = valid,
+                onClick = {
+                    if (oldIcon != null && oldIcon != icon) store.deleteIconFile(oldIcon)
+                    onSave(
+                        Station(
+                            id = initial?.id ?: java.util.UUID.randomUUID().toString(),
+                            name = name.trim().ifBlank { url.trim() },
+                            streamUrl = url.trim(),
+                            icon = icon
+                        )
+                    )
+                }
+            ) { Text("Сохранить") }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Отмена") }
+        }
     )
 }
