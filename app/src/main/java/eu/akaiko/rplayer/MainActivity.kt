@@ -11,17 +11,30 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 
 class MainActivity : ComponentActivity() {
 
     private val photoPermLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-            // Defer heavy system screens; only ask all-files if still needed.
             requestAllFilesAccessSafely()
         }
 
@@ -33,16 +46,45 @@ class MainActivity : ComponentActivity() {
             CrashLog.append("MAIN", "requestPermissionsAtStart failed", t)
         }
         setContent {
-            val dark = isSystemInDarkTheme()
-            // dynamic*ColorScheme requires API 31+; calling it on older MIUI (Android 10/11) crashes on launch.
+            var themeMode by remember { mutableStateOf(ThemePrefs.load(this@MainActivity)) }
+            var showThemePicker by remember {
+                mutableStateOf(!ThemePrefs.isChosen(this@MainActivity))
+            }
+
+            val systemDark = isSystemInDarkTheme()
+            val useDark = when (themeMode) {
+                AppThemeMode.LIGHT -> false
+                AppThemeMode.DARK -> true
+                AppThemeMode.SYSTEM -> systemDark
+            }
+
+            // dynamic*ColorScheme only on API 31+ (safe on older MIUI)
             val scheme = when {
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-                    if (dark) dynamicDarkColorScheme(this) else dynamicLightColorScheme(this)
+                    if (useDark) dynamicDarkColorScheme(this@MainActivity)
+                    else dynamicLightColorScheme(this@MainActivity)
                 }
-                dark -> darkColorScheme()
+                useDark -> darkColorScheme()
                 else -> lightColorScheme()
             }
-            MaterialTheme(colorScheme = scheme) { RadioApp() }
+
+            MaterialTheme(colorScheme = scheme) {
+                RadioApp(
+                    onOpenThemePicker = { showThemePicker = true }
+                )
+                if (showThemePicker) {
+                    ThemePickerDialog(
+                        current = themeMode,
+                        onPick = { mode ->
+                            ThemePrefs.save(this@MainActivity, mode)
+                            themeMode = mode
+                            showThemePicker = false
+                        },
+                        // First launch: must choose; later opens from menu can dismiss
+                        dismissible = ThemePrefs.isChosen(this@MainActivity)
+                    )
+                }
+            }
         }
     }
 
@@ -78,4 +120,37 @@ class MainActivity : ComponentActivity() {
             CrashLog.append("MAIN", "requestAllFilesAccess failed", t)
         }
     }
+}
+
+@Composable
+private fun ThemePickerDialog(
+    current: AppThemeMode,
+    onPick: (AppThemeMode) -> Unit,
+    dismissible: Boolean
+) {
+    AlertDialog(
+        onDismissRequest = { if (dismissible) onPick(current) },
+        title = { Text("Тема оформления") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Выберите внешний вид приложения:")
+                AppThemeMode.entries.forEach { mode ->
+                    TextButton(
+                        onClick = { onPick(mode) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            if (mode == current) "●  ${mode.labelRu}" else "○  ${mode.labelRu}"
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = if (dismissible) {
+            {
+                TextButton(onClick = { onPick(current) }) { Text("Закрыть") }
+            }
+        } else null
+    )
 }
