@@ -131,6 +131,8 @@ fun RadioApp() {
             override fun onPlayerError(e: PlaybackException) {
                 error = e.message ?: "Ошибка воспроизведения"
                 currentId = null; nowPlaying = null
+                val station = stations.find { it.id == currentId }?.name ?: "?"
+                CrashLog.append("PLAYER", "Playback error (station=$station)", e)
             }
         })
     }
