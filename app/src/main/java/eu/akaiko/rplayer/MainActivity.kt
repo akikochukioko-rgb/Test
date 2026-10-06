@@ -13,9 +13,14 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
@@ -27,8 +32,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 
 class MainActivity : ComponentActivity() {
@@ -47,9 +53,11 @@ class MainActivity : ComponentActivity() {
         }
         setContent {
             var themeMode by remember { mutableStateOf(ThemePrefs.load(this@MainActivity)) }
-            var showThemePicker by remember {
+            // First launch forces settings; later opened via gear icon
+            var showSettings by remember {
                 mutableStateOf(!ThemePrefs.isChosen(this@MainActivity))
             }
+            val firstRun = remember { !ThemePrefs.isChosen(this@MainActivity) }
 
             val systemDark = isSystemInDarkTheme()
             val useDark = when (themeMode) {
@@ -58,7 +66,6 @@ class MainActivity : ComponentActivity() {
                 AppThemeMode.SYSTEM -> systemDark
             }
 
-            // dynamic*ColorScheme only on API 31+ (safe on older MIUI)
             val scheme = when {
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
                     if (useDark) dynamicDarkColorScheme(this@MainActivity)
@@ -70,18 +77,21 @@ class MainActivity : ComponentActivity() {
 
             MaterialTheme(colorScheme = scheme) {
                 RadioApp(
-                    onOpenThemePicker = { showThemePicker = true }
+                    onOpenSettings = { showSettings = true }
                 )
-                if (showThemePicker) {
-                    ThemePickerDialog(
-                        current = themeMode,
-                        onPick = { mode ->
+                if (showSettings) {
+                    SettingsDialog(
+                        themeMode = themeMode,
+                        requireThemeChoice = firstRun && !ThemePrefs.isChosen(this@MainActivity),
+                        onThemeSelected = { mode ->
                             ThemePrefs.save(this@MainActivity, mode)
                             themeMode = mode
-                            showThemePicker = false
                         },
-                        // First launch: must choose; later opens from menu can dismiss
-                        dismissible = ThemePrefs.isChosen(this@MainActivity)
+                        onDismiss = {
+                            if (ThemePrefs.isChosen(this@MainActivity)) {
+                                showSettings = false
+                            }
+                        }
                     )
                 }
             }
@@ -123,34 +133,62 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun ThemePickerDialog(
-    current: AppThemeMode,
-    onPick: (AppThemeMode) -> Unit,
-    dismissible: Boolean
+private fun SettingsDialog(
+    themeMode: AppThemeMode,
+    requireThemeChoice: Boolean,
+    onThemeSelected: (AppThemeMode) -> Unit,
+    onDismiss: () -> Unit
 ) {
     AlertDialog(
-        onDismissRequest = { if (dismissible) onPick(current) },
-        title = { Text("Тема оформления") },
+        onDismissRequest = { if (!requireThemeChoice) onDismiss() },
+        title = { Text("Настройки") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Выберите внешний вид приложения:")
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "Тема оформления",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    "Можно сменить в любой момент через иконку ⚙",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                HorizontalDivider(Modifier.padding(vertical = 4.dp))
                 AppThemeMode.entries.forEach { mode ->
-                    TextButton(
-                        onClick = { onPick(mode) },
-                        modifier = Modifier.fillMaxWidth()
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .selectable(
+                                selected = themeMode == mode,
+                                onClick = { onThemeSelected(mode) },
+                                role = Role.RadioButton
+                            )
+                            .padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
+                        RadioButton(
+                            selected = themeMode == mode,
+                            onClick = { onThemeSelected(mode) }
+                        )
                         Text(
-                            if (mode == current) "●  ${mode.labelRu}" else "○  ${mode.labelRu}"
+                            mode.labelRu,
+                            modifier = Modifier.padding(start = 8.dp),
+                            style = MaterialTheme.typography.bodyLarge
                         )
                     }
                 }
             }
         },
-        confirmButton = {},
-        dismissButton = if (dismissible) {
-            {
-                TextButton(onClick = { onPick(current) }) { Text("Закрыть") }
+        confirmButton = {
+            TextButton(
+                enabled = !requireThemeChoice || ThemePrefs.isChosen(
+                    androidx.compose.ui.platform.LocalContext.current
+                ),
+                onClick = onDismiss
+            ) {
+                Text(if (requireThemeChoice) "Готово" else "Закрыть")
             }
-        } else null
+        }
     )
 }
