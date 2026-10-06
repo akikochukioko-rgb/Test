@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -65,7 +66,7 @@ private fun formatNowPlaying(meta: MediaMetadata, stationName: String?): String?
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun RadioApp(
-    onOpenThemePicker: () -> Unit = {}
+    onOpenSettings: () -> Unit = {}
 ) {
     val ctx = LocalContext.current
     val store = remember { StationStore(ctx) }
@@ -170,15 +171,14 @@ fun RadioApp(
             TopAppBar(
                 title = { Text("Радио") },
                 actions = {
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(Icons.Default.Settings, contentDescription = "Настройки")
+                    }
                     Box {
                         IconButton(onClick = { menuExpanded = true }) {
                             Icon(Icons.Default.MoreVert, contentDescription = "Меню")
                         }
                         DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
-                            DropdownMenuItem(text = { Text("Тема оформления") }, onClick = {
-                                menuExpanded = false
-                                onOpenThemePicker()
-                            })
                             DropdownMenuItem(text = { Text("Импорт JSON") }, onClick = {
                                 menuExpanded = false; importLauncher.launch("application/json")
                             })
