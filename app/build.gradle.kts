@@ -1,10 +1,10 @@
+import java.util.Base64
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
-
-import java.util.Base64
 
 /** Decode committed base64 keystore once so every CI/local build uses the same signature. */
 fun ensureTestKeystore(): File {
