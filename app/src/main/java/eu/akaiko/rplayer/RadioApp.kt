@@ -64,7 +64,9 @@ private fun formatNowPlaying(meta: MediaMetadata, stationName: String?): String?
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-fun RadioApp() {
+fun RadioApp(
+    onOpenThemePicker: () -> Unit = {}
+) {
     val ctx = LocalContext.current
     val store = remember { StationStore(ctx) }
     val stations = remember { mutableStateListOf<Station>().apply { addAll(store.load()) } }
@@ -173,6 +175,10 @@ fun RadioApp() {
                             Icon(Icons.Default.MoreVert, contentDescription = "Меню")
                         }
                         DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                            DropdownMenuItem(text = { Text("Тема оформления") }, onClick = {
+                                menuExpanded = false
+                                onOpenThemePicker()
+                            })
                             DropdownMenuItem(text = { Text("Импорт JSON") }, onClick = {
                                 menuExpanded = false; importLauncher.launch("application/json")
                             })
