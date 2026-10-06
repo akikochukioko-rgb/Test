@@ -8,30 +8,29 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Pin Ubuntu 24.04 until the ubuntu-latest → 26 migration (Oct 19, 2026) is settled
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 17
 
-      # v3 defaults include the removed package "tools" and fails with:
-      #   Warning: Failed to find package 'tools'
-      # Use explicit packages (no tools) + API 36 for compileSdk.
-      - uses: android-actions/setup-android@v3
+      # v4: Node 24 runtime; does not request the removed "tools" package by default
+      - uses: android-actions/setup-android@v4
         with:
           packages: platform-tools platforms;android-36 build-tools;35.0.0
 
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-version: 8.12
+          gradle-version: "8.12"
 
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: RadioPlayer-debug-apk
           path: app/build/outputs/apk/debug/*.apk
