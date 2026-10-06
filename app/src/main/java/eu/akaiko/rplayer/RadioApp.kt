@@ -78,6 +78,7 @@ fun RadioApp() {
     var editing by remember { mutableStateOf<Station?>(null) }
     var showDialog by remember { mutableStateOf(false) }
     var menuExpanded by remember { mutableStateOf(false) }
+    val isMiui = remember { MiuiSupport.isMiuiOrHyperOs() }
 
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -181,6 +182,40 @@ fun RadioApp() {
                                     statusMsg = null; error = "Нечего экспортировать — список пуст"
                                 } else exportLauncher.launch("radio_stations.json")
                             })
+                            if (isMiui) {
+                                HorizontalDivider()
+                                DropdownMenuItem(
+                                    text = { Text("MIUI: автозапуск") },
+                                    onClick = {
+                                        menuExpanded = false
+                                        val ok = MiuiSupport.openAutostartSettings(ctx)
+                                        statusMsg = if (ok) "Включите автозапуск для Radio Player"
+                                        else "Не удалось открыть настройки автозапуска"
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("MIUI: батарея / фон") },
+                                    onClick = {
+                                        menuExpanded = false
+                                        val ok = MiuiSupport.openBatterySaverSettings(ctx)
+                                        statusMsg = if (ok) "Выберите «Без ограничений» для приложения"
+                                        else "Не удалось открыть настройки батареи"
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Игнор оптимизации батареи") },
+                                    onClick = {
+                                        menuExpanded = false
+                                        if (MiuiSupport.isIgnoringBatteryOptimizations(ctx)) {
+                                            statusMsg = "Оптимизация батареи уже отключена"
+                                        } else {
+                                            val ok = MiuiSupport.requestIgnoreBatteryOptimizations(ctx)
+                                            statusMsg = if (ok) "Разрешите работу в фоне"
+                                            else "Не удалось открыть диалог"
+                                        }
+                                    }
+                                )
+                            }
                         }
                     }
                 }
