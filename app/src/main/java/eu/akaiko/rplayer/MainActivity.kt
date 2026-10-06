@@ -20,6 +20,7 @@ class MainActivity : ComponentActivity() {
     private val photoPermLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
             requestAllFilesAccess()
+            requestBatteryAndMiui()
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -33,7 +34,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** Step 1: photo gallery (+ notifications). Step 2 (in callback): all files access. */
+    /** Step 1: photo gallery (+ notifications). Step 2: all files + battery/MIUI. */
     private fun requestPermissionsAtStart() {
         val perms = mutableListOf<String>()
         if (Build.VERSION.SDK_INT >= 33) {
@@ -53,5 +54,16 @@ class MainActivity : ComponentActivity() {
         } catch (e: Exception) {
             startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
         }
+    }
+
+    /** Ignore battery optimizations; on MIUI also open Autostart once (prefs-gated). */
+    private fun requestBatteryAndMiui() {
+        MiuiSupport.requestIgnoreBatteryOptimizations(this)
+        if (!MiuiSupport.isMiuiOrHyperOs()) return
+        val prefs = getSharedPreferences("miui_setup", MODE_PRIVATE)
+        if (prefs.getBoolean("autostart_prompted", false)) return
+        prefs.edit().putBoolean("autostart_prompted", true).apply()
+        // Open Autostart list so user can enable this app (cannot be set programmatically).
+        MiuiSupport.openAutostartSettings(this)
     }
 }
