@@ -3,3 +3,6 @@ build/
 local.properties
 .idea/
 *.iml
+
+# Generated from rplayer-test.keystore.b64 at build time
+app/rplayer-test.keystore
