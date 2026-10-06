@@ -129,10 +129,17 @@ fun RadioApp() {
                 nowPlaying = formatNowPlaying(mediaMetadata, stations.find { it.id == currentId }?.name)
             }
             override fun onPlayerError(e: PlaybackException) {
+                val station = stations.find { it.id == currentId }
+                val info = buildString {
+                    append("station=")
+                    append(station?.name ?: "?")
+                    append(" url=")
+                    append(station?.streamUrl ?: "?")
+                }
                 error = e.message ?: "Ошибка воспроизведения"
-                currentId = null; nowPlaying = null
-                val station = stations.find { it.id == currentId }?.name ?: "?"
-                CrashLog.append("PLAYER", "Playback error (station=$station)", e)
+                currentId = null
+                nowPlaying = null
+                CrashLog.append("PLAYER", "Playback error ($info)", e)
             }
         })
     }
