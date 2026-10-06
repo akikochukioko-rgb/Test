@@ -419,7 +419,6 @@ fun RadioApp(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun StationDialog(
     initial: Station?,
@@ -429,66 +428,73 @@ private fun StationDialog(
 ) {
     var name by remember { mutableStateOf(initial?.name ?: "") }
     var url by remember { mutableStateOf(initial?.streamUrl ?: "") }
-    var iconUri by remember { mutableStateOf<Uri?>(null) }
-    var iconPath by remember { mutableStateOf(initial?.icon) }
-    var error by remember { mutableStateOf<String?>(null) }
-
-    val pickIcon = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        iconUri = uri
-        val saved = store.saveIcon(uri)
-        if (saved != null) {
-            store.deleteIconFile(iconPath)
-            iconPath = saved
-        } else {
-            error = AppStrings.t("icon_fail")
-        }
+    var icon by remember { mutableStateOf(initial?.icon) }
+    var iconUrl by remember {
+        mutableStateOf(initial?.icon?.takeIf { it.startsWith("http") } ?: "")
     }
+    val oldIcon = initial?.icon
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) store.importIcon(uri)?.let { icon = it; iconUrl = "" }
+    }
+    val valid = url.trim().let { it.startsWith("http://") || it.startsWith("https://") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (initial == null) AppStrings.t("add_station") else AppStrings.t("edit_station")) },
+        title = {
+            Text(
+                if (initial == null) AppStrings.t("new_station")
+                else AppStrings.t("edit_station")
+            )
+        },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
+                    name, { name = it },
                     label = { Text(AppStrings.t("name")) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                    singleLine = true
                 )
                 OutlinedTextField(
-                    value = url,
-                    onValueChange = { url = it },
+                    url, { url = it },
                     label = { Text(AppStrings.t("stream_url")) },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                    isError = url.isNotBlank() && !valid
+                )
+                OutlinedTextField(
+                    iconUrl,
+                    { iconUrl = it; icon = it.trim().ifBlank { null } },
+                    label = { Text(AppStrings.t("icon_url")) },
+                    singleLine = true
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Button(onClick = { pickIcon.launch("image/*") }) {
-                        Text(AppStrings.t("pick_icon"))
+                    OutlinedButton(onClick = { picker.launch("image/*") }) {
+                        Text(AppStrings.t("pick_file"))
                     }
-                    Spacer(Modifier.width(8.dp))
-                    if (iconPath != null || iconUri != null) {
-                        Text(AppStrings.t("icon_set"), style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.width(12.dp))
+                    iconModel(icon)?.let {
+                        AsyncImage(
+                            it, null,
+                            Modifier.size(48.dp).clip(RoundedCornerShape(10.dp)),
+                            contentScale = ContentScale.Crop
+                        )
                     }
                 }
-                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }
         },
         confirmButton = {
-            TextButton(onClick = {
-                val n = name.trim()
-                val u = url.trim()
-                when {
-                    n.isEmpty() -> error = AppStrings.t("name_required")
-                    u.isEmpty() -> error = AppStrings.t("url_required")
-                    else -> {
-                        val id = initial?.id ?: java.util.UUID.randomUUID().toString()
-                        onSave(Station(id = id, name = n, streamUrl = u, icon = iconPath))
-                    }
+            TextButton(
+                enabled = valid,
+                onClick = {
+                    if (oldIcon != null && oldIcon != icon) store.deleteIconFile(oldIcon)
+                    onSave(
+                        Station(
+                            id = initial?.id ?: java.util.UUID.randomUUID().toString(),
+                            name = name.trim().ifBlank { url.trim() },
+                            streamUrl = url.trim(),
+                            icon = icon
+                        )
+                    )
                 }
-            }) { Text(AppStrings.t("save")) }
+            ) { Text(AppStrings.t("save")) }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text(AppStrings.t("cancel")) }
