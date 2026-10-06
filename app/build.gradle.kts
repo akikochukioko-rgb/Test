@@ -26,8 +26,8 @@ android {
         applicationId = "eu.akaiko.rplayer"
         minSdk = 29      // Android 10
         targetSdk = 36   // Android 16
-        versionCode = 3
-        versionName = "1.2"
+        versionCode = 4
+        versionName = "1.3"
     }
 
     signingConfigs {
