@@ -4,21 +4,51 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+import java.util.Base64
+
+/** Decode committed base64 keystore once so every CI/local build uses the same signature. */
+fun ensureTestKeystore(): File {
+    val ks = file("rplayer-test.keystore")
+    if (!ks.exists()) {
+        val b64 = file("rplayer-test.keystore.b64").readText().replace(Regex("\\s"), "")
+        ks.writeBytes(Base64.getDecoder().decode(b64))
+    }
+    return ks
+}
+
+val testKeystore = ensureTestKeystore()
+
 android {
-    namespace = "com.example.radioplayer"
+    namespace = "eu.akaiko.rplayer"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.example.radioplayer"
+        applicationId = "eu.akaiko.rplayer"
         minSdk = 29      // Android 10
         targetSdk = 36   // Android 16
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 3
+        versionName = "1.2"
+    }
+
+    signingConfigs {
+        create("test") {
+            storeFile = testKeystore
+            storePassword = "rplayer-test"
+            keyAlias = "rplayer"
+            keyPassword = "rplayer-test"
+        }
     }
 
     buildTypes {
-        release { isMinifyEnabled = false }
+        debug {
+            signingConfig = signingConfigs.getByName("test")
+        }
+        release {
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("test")
+        }
     }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
