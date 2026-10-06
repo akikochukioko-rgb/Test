@@ -1,0 +1,230 @@
+package com.example.radioplayer
+
+import android.content.ComponentName
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.session.MediaController
+import androidx.media3.session.SessionToken
+import coil.compose.AsyncImage
+import java.io.File
+
+private fun iconModel(icon: String?): Any? =
+    when {
+        icon == null -> null
+        icon.startsWith("http") -> icon
+        else -> File(icon)
+    }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun RadioApp() {
+    val ctx = LocalContext.current
+    val store = remember { StationStore(ctx) }
+    val stations = remember { mutableStateListOf<Station>().apply { addAll(store.load()) } }
+
+    var controller by remember { mutableStateOf<MediaController?>(null) }
+    var currentId by remember { mutableStateOf<String?>(null) }
+    var isPlaying by remember { mutableStateOf(false) }
+    var buffering by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    var editing by remember { mutableStateOf<Station?>(null) }
+    var showDialog by remember { mutableStateOf(false) }
+
+    DisposableEffect(Unit) {
+        val future = MediaController.Builder(
+            ctx, SessionToken(ctx, ComponentName(ctx, PlaybackService::class.java))
+        ).buildAsync()
+        future.addListener({
+            try { controller = future.get() } catch (_: Exception) {}
+        }, ContextCompat.getMainExecutor(ctx))
+        onDispose {
+            controller?.release()
+            MediaController.releaseFuture(future)
+        }
+    }
+
+    LaunchedEffect(controller) {
+        val c = controller ?: return@LaunchedEffect
+        val listener = object : Player.Listener {
+            override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
+            override fun onPlaybackStateChanged(state: Int) {
+                buffering = state == Player.STATE_BUFFERING
+                if (state == Player.STATE_IDLE || state == Player.STATE_ENDED) currentId = null
+            }
+            override fun onPlayerError(e: PlaybackException) {
+                error = e.message ?: "Ошибка воспроизведения"
+                currentId = null
+            }
+        }
+        c.addListener(listener)
+    }
+
+    fun toggle(s: Station) {
+        val c = controller ?: return
+        error = null
+        if (currentId == s.id) {
+            if (c.isPlaying) c.pause() else c.play()
+            return
+        }
+        if (currentId == s.id && c.playbackState != Player.STATE_IDLE) { c.play(); return }
+        val meta = MediaMetadata.Builder().setTitle(s.name).setArtist("Radio").apply {
+            when (val m = iconModel(s.icon)) {
+                is String -> setArtworkUri(Uri.parse(m))
+                is File -> setArtworkUri(Uri.fromFile(m))
+            }
+        }.build()
+        c.setMediaItem(MediaItem.Builder().setMediaId(s.id).setUri(s.streamUrl).setMediaMetadata(meta).build())
+        c.prepare(); c.play()
+        currentId = s.id
+    }
+
+    Scaffold(
+        topBar = { TopAppBar(title = { Text("Радио") }) },
+        floatingActionButton = {
+            FloatingActionButton(onClick = { editing = null; showDialog = true }) {
+                Icon(Icons.Default.Add, contentDescription = "Добавить станцию")
+            }
+        }
+    ) { pad ->
+        Column(Modifier.padding(pad).fillMaxSize()) {
+            error?.let {
+                Text(it, color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+            }
+            if (stations.isEmpty()) {
+                Box(Modifier.fillMaxSize(), Alignment.Center) {
+                    Text("Станций пока нет.\nНажмите «+», чтобы добавить свою.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(stations, key = { it.id }) { s ->
+                    val active = currentId == s.id
+                    Card(
+                        modifier = Modifier.fillMaxWidth().clickable { toggle(s) },
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (active) MaterialTheme.colorScheme.primaryContainer
+                            else MaterialTheme.colorScheme.surfaceVariant)
+                    ) {
+                        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.size(56.dp).clip(RoundedCornerShape(12.dp))
+                                .then(Modifier), Alignment.Center) {
+                                val m = iconModel(s.icon)
+                                if (m != null) AsyncImage(m, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                                else Text("📻", fontSize = 28.sp)
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(s.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(
+                                    when {
+                                        active && buffering -> "Буферизация…"
+                                        active && isPlaying -> "Играет"
+                                        else -> s.streamUrl
+                                    },
+                                    style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                            Text(if (active && (isPlaying || buffering)) "⏸" else "▶", fontSize = 26.sp,
+                                modifier = Modifier.padding(horizontal = 8.dp))
+                            IconButton(onClick = { editing = s; showDialog = true }) {
+                                Icon(Icons.Default.Edit, contentDescription = "Изменить")
+                            }
+                            IconButton(onClick = {
+                                if (currentId == s.id) { controller?.stop(); currentId = null }
+                                store.deleteIconFile(s.icon)
+                                stations.remove(s)
+                                store.save(stations)
+                            }) {
+                                Icon(Icons.Default.Delete, contentDescription = "Удалить")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showDialog) {
+        StationDialog(
+            initial = editing,
+            store = store,
+            onDismiss = { showDialog = false },
+            onSave = { st ->
+                val idx = stations.indexOfFirst { it.id == st.id }
+                if (idx >= 0) stations[idx] = st else stations.add(st)
+                store.save(stations)
+                showDialog = false
+            }
+        )
+    }
+}
+
+@Composable
+private fun StationDialog(initial: Station?, store: StationStore, onDismiss: () -> Unit, onSave: (Station) -> Unit) {
+    var name by remember { mutableStateOf(initial?.name ?: "") }
+    var url by remember { mutableStateOf(initial?.streamUrl ?: "") }
+    var icon by remember { mutableStateOf(initial?.icon) }
+    var iconUrl by remember { mutableStateOf(initial?.icon?.takeIf { it.startsWith("http") } ?: "") }
+    val oldIcon = initial?.icon
+
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) store.importIcon(uri)?.let { icon = it; iconUrl = "" }
+    }
+    val valid = url.trim().let { it.startsWith("http://") || it.startsWith("https://") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (initial == null) "Новая станция" else "Изменить станцию") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(name, { name = it }, label = { Text("Название") }, singleLine = true)
+                OutlinedTextField(url, { url = it }, label = { Text("Ссылка на поток (mp3)") }, singleLine = true,
+                    isError = url.isNotBlank() && !valid)
+                OutlinedTextField(iconUrl, { iconUrl = it; icon = it.trim().ifBlank { null } },
+                    label = { Text("Ссылка на иконку (необязательно)") }, singleLine = true)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedButton(onClick = { picker.launch("image/*") }) { Text("Выбрать из файлов") }
+                    Spacer(Modifier.width(12.dp))
+                    iconModel(icon)?.let {
+                        AsyncImage(it, null, Modifier.size(48.dp).clip(RoundedCornerShape(10.dp)), contentScale = ContentScale.Crop)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = valid, onClick = {
+                if (oldIcon != null && oldIcon != icon) store.deleteIconFile(oldIcon)
+                onSave(Station(
+                    id = initial?.id ?: java.util.UUID.randomUUID().toString(),
+                    name = name.trim().ifBlank { url.trim() },
+                    streamUrl = url.trim(), icon = icon))
+            }) { Text("Сохранить") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
+    )
+}
