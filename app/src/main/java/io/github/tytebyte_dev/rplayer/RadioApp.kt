@@ -97,6 +97,7 @@ private fun formatNowPlaying(meta: MediaMetadata, stationName: String?): String?
     fun parseCombined(raw: String): String? {
         val t = raw.trim()
         if (t.isEmpty() || looksLikeStation(t)) return null
+        // Artist - Title / Artist — Title / Artist: Title
         val parts = t.split(Regex("""\s[-—–:]\s"""), limit = 2)
         if (parts.size == 2) {
             val a = parts[0].trim()
@@ -243,5 +244,260 @@ fun RadioApp(
         currentId = s.id
     }
 
-    // CONTINUED_IN_PART_2
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(AppStrings.t("app_title")) },
+                actions = {
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(Icons.Default.Settings, contentDescription = AppStrings.t("settings"))
+                    }
+                    Box {
+                        IconButton(onClick = { menuExpanded = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = AppStrings.t("menu"))
+                        }
+                        DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                            DropdownMenuItem(text = { Text(AppStrings.t("import_json")) }, onClick = {
+                                menuExpanded = false
+                                importLauncher.launch("application/json")
+                            })
+                            DropdownMenuItem(text = { Text(AppStrings.t("export_json")) }, onClick = {
+                                menuExpanded = false
+                                if (stations.isEmpty()) {
+                                    statusMsg = null
+                                    error = AppStrings.t("export_empty")
+                                } else exportLauncher.launch("radio_stations.json")
+                            })
+                            if (isMiui) {
+                                HorizontalDivider()
+                                DropdownMenuItem(text = { Text(AppStrings.t("miui_autostart")) }, onClick = {
+                                    menuExpanded = false
+                                    statusMsg = if (MiuiSupport.openAutostartSettings(ctx))
+                                        AppStrings.t("miui_autostart_hint")
+                                    else AppStrings.t("miui_autostart_fail")
+                                })
+                                DropdownMenuItem(text = { Text(AppStrings.t("miui_battery")) }, onClick = {
+                                    menuExpanded = false
+                                    statusMsg = if (MiuiSupport.openBatterySaverSettings(ctx))
+                                        AppStrings.t("miui_battery_hint")
+                                    else AppStrings.t("miui_battery_fail")
+                                })
+                                DropdownMenuItem(text = { Text(AppStrings.t("miui_ignore_battery")) }, onClick = {
+                                    menuExpanded = false
+                                    statusMsg = when {
+                                        MiuiSupport.isIgnoringBatteryOptimizations(ctx) ->
+                                            AppStrings.t("battery_already")
+                                        MiuiSupport.requestIgnoreBatteryOptimizations(ctx) ->
+                                            AppStrings.t("battery_allow")
+                                        else -> AppStrings.t("battery_fail")
+                                    }
+                                })
+                            }
+                        }
+                    }
+                }
+            )
+        },
+        floatingActionButton = {
+            FloatingActionButton(onClick = { editing = null; showDialog = true }) {
+                Icon(Icons.Default.Add, contentDescription = AppStrings.t("add_station"))
+            }
+        }
+    ) { pad ->
+        Column(Modifier.padding(pad).fillMaxSize()) {
+            error?.let {
+                Text(it, color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+            }
+            statusMsg?.let {
+                Text(it, color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+            }
+            if (stations.isEmpty()) {
+                Box(Modifier.fillMaxSize(), Alignment.Center) {
+                    Text(AppStrings.t("empty_stations"),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else {
+                LazyColumn(
+                    contentPadding = PaddingValues(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(stations, key = { it.id }) { s ->
+                        val active = currentId == s.id
+                        Card(
+                            modifier = Modifier.fillMaxWidth().clickable { playStation(s) },
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (active) MaterialTheme.colorScheme.primaryContainer
+                                else MaterialTheme.colorScheme.surfaceVariant
+                            )
+                        ) {
+                            Row(
+                                Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    Modifier.size(56.dp).clip(RoundedCornerShape(12.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    val m = iconModel(s.icon)
+                                    if (m != null) AsyncImage(
+                                        m, null, Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    ) else Text("📻", fontSize = 28.sp)
+                                }
+                                Spacer(Modifier.width(12.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        s.name,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    val line = when {
+                                        active && buffering -> AppStrings.t("buffering")
+                                        active && isPlaying -> {
+                                            val track = nowPlaying
+                                            if (track.isNullOrBlank()) AppStrings.t("playing")
+                                            else AppStrings.t("playing_prefix").format(track)
+                                        }
+                                        else -> s.streamUrl
+                                    }
+                                    val marquee = active && isPlaying && !nowPlaying.isNullOrBlank()
+                                    Text(
+                                        line,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        maxLines = 1,
+                                        overflow = if (marquee) TextOverflow.Visible else TextOverflow.Ellipsis,
+                                        modifier = if (marquee)
+                                            Modifier.fillMaxWidth().basicMarquee(
+                                                iterations = Int.MAX_VALUE, velocity = 40.dp
+                                            )
+                                        else Modifier
+                                    )
+                                }
+                                Text(
+                                    if (active && (isPlaying || buffering)) "⏸" else "▶",
+                                    fontSize = 26.sp,
+                                    modifier = Modifier.padding(horizontal = 8.dp)
+                                )
+                                IconButton(onClick = { editing = s; showDialog = true }) {
+                                    Icon(Icons.Default.Edit, contentDescription = AppStrings.t("edit"))
+                                }
+                                IconButton(onClick = {
+                                    if (currentId == s.id) {
+                                        controller?.stop()
+                                        currentId = null
+                                        nowPlaying = null
+                                    }
+                                    store.deleteIconFile(s.icon)
+                                    stations.remove(s)
+                                    store.save(stations)
+                                }) {
+                                    Icon(Icons.Default.Delete, contentDescription = AppStrings.t("delete"))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showDialog) {
+        StationDialog(
+            initial = editing,
+            store = store,
+            onDismiss = { showDialog = false },
+            onSave = { st ->
+                val idx = stations.indexOfFirst { it.id == st.id }
+                if (idx >= 0) stations[idx] = st else stations.add(st)
+                store.save(stations)
+                showDialog = false
+            }
+        )
+    }
+}
+
+@Composable
+private fun StationDialog(
+    initial: Station?,
+    store: StationStore,
+    onDismiss: () -> Unit,
+    onSave: (Station) -> Unit
+) {
+    var name by remember { mutableStateOf(initial?.name ?: "") }
+    var url by remember { mutableStateOf(initial?.streamUrl ?: "") }
+    var icon by remember { mutableStateOf(initial?.icon) }
+    var iconUrl by remember {
+        mutableStateOf(initial?.icon?.takeIf { it.startsWith("http") } ?: "")
+    }
+    val oldIcon = initial?.icon
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) store.importIcon(uri)?.let { icon = it; iconUrl = "" }
+    }
+    val valid = url.trim().let { it.startsWith("http://") || it.startsWith("https://") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                if (initial == null) AppStrings.t("new_station")
+                else AppStrings.t("edit_station")
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    name, { name = it },
+                    label = { Text(AppStrings.t("name")) },
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    url, { url = it },
+                    label = { Text(AppStrings.t("stream_url")) },
+                    singleLine = true,
+                    isError = url.isNotBlank() && !valid
+                )
+                OutlinedTextField(
+                    iconUrl,
+                    { iconUrl = it; icon = it.trim().ifBlank { null } },
+                    label = { Text(AppStrings.t("icon_url")) },
+                    singleLine = true
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedButton(onClick = { picker.launch("image/*") }) {
+                        Text(AppStrings.t("pick_file"))
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    iconModel(icon)?.let {
+                        AsyncImage(
+                            it, null,
+                            Modifier.size(48.dp).clip(RoundedCornerShape(10.dp)),
+                            contentScale = ContentScale.Crop
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = valid,
+                onClick = {
+                    if (oldIcon != null && oldIcon != icon) store.deleteIconFile(oldIcon)
+                    onSave(
+                        Station(
+                            id = initial?.id ?: java.util.UUID.randomUUID().toString(),
+                            name = name.trim().ifBlank { url.trim() },
+                            streamUrl = url.trim(),
+                            icon = icon
+                        )
+                    )
+                }
+            ) { Text(AppStrings.t("save")) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(AppStrings.t("cancel")) }
+        }
+    )
 }
