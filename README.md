@@ -24,10 +24,11 @@
 
 Дубликаты по URL при импорте пропускаются.
 
-## Сборка
-Локально: `gradle assembleDebug` (Gradle 8.12, JDK 17, Android SDK 36) — debug-подпись по умолчанию.
+## Сборка и подпись
 
-GitHub Actions (`.github/workflows/android.yml`, `android-release.yml`) подписывает APK через **Repository secrets**:
+Debug и release подписываются **одним и тем же** release-keystore (без Android debug key).
+
+GitHub Actions — repository secrets:
 
 | Secret | Описание |
 |--------|----------|
@@ -35,6 +36,16 @@ GitHub Actions (`.github/workflows/android.yml`, `android-release.yml`) подп
 | `KEYSTORE_PASSWORD` | Пароль хранилища |
 | `KEY_ALIAS` | Alias ключа |
 | `KEY_PASSWORD` | Пароль ключа |
+
+Локально (те же переменные окружения):
+
+```bash
+export KEYSTORE_BASE64="$(base64 -w0 release.keystore)"
+export KEYSTORE_PASSWORD=...
+export KEY_ALIAS=...
+export KEY_PASSWORD=...
+gradle assembleDebug   # или assembleRelease
+```
 
 ## Лицензия
 

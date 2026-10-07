@@ -16,6 +16,11 @@ jobs:
   release:
     # Pin Ubuntu 24.04 until the ubuntu-latest → 26 migration (Oct 19, 2026) is settled
     runs-on: ubuntu-24.04
+    env:
+      KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+      KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v5
 
@@ -33,30 +38,19 @@ jobs:
         with:
           gradle-version: "8.12"
 
-      # Repository secrets: KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD
-      - name: Decode keystore from secrets
-        env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+      - name: Check signing secrets
         run: |
           set -euo pipefail
-          if [ -z "${KEYSTORE_BASE64:-}" ]; then
-            echo "Secret KEYSTORE_BASE64 is not set" >&2
+          missing=
+          for n in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            eval "v=\$$n"
+            if [ -z "${v:-}" ]; then missing="$missing $n"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "Missing repository secrets:$missing" >&2
             exit 1
           fi
-          if [ -z "${KEYSTORE_PASSWORD:-}" ] || [ -z "${KEY_ALIAS:-}" ] || [ -z "${KEY_PASSWORD:-}" ]; then
-            echo "Secrets KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD must all be set" >&2
-            exit 1
-          fi
-          KS="$GITHUB_WORKSPACE/app/release.keystore"
-          echo "$KEYSTORE_BASE64" | base64 -d > "$KS"
-          echo "KEYSTORE_FILE=$KS" >> "$GITHUB_ENV"
-          echo "KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
-          echo "KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
-          echo "KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
-          echo "Keystore decoded to $KS (alias=$KEY_ALIAS)"
+          echo "Signing secrets present (KEYSTORE_BASE64 length=${#KEYSTORE_BASE64})"
 
       - name: Build release APK
         run: gradle assembleRelease --no-daemon
@@ -75,7 +69,6 @@ jobs:
           echo "path=$APK" >> "$GITHUB_OUTPUT"
 
           if [ -n "${INPUT_TAG:-}" ]; then
-            # Sanitize tag from env (avoid shell injection via workflow input)
             TAG=$(printf '%s' "$INPUT_TAG" | tr ' ' '-' | tr -cd 'A-Za-z0-9._-')
             if [ -z "$TAG" ]; then
               TAG="build-${{ github.run_number }}"
