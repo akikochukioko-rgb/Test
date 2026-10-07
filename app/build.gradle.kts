@@ -27,10 +27,13 @@ fun resolveKeystore(): File {
     return ks
 }
 
+fun envOrDefault(name: String, default: String): String =
+    System.getenv(name)?.takeIf { it.isNotBlank() } ?: default
+
 val signingKeystore = resolveKeystore()
-val storePass = System.getenv("KEYSTORE_PASSWORD") ?: "rplayer-test"
-val keyAliasEnv = System.getenv("KEY_ALIAS") ?: "rplayer"
-val keyPass = System.getenv("KEY_PASSWORD") ?: "rplayer-test"
+val storePass = envOrDefault("KEYSTORE_PASSWORD", "rplayer-test")
+val keyAliasEnv = envOrDefault("KEY_ALIAS", "rplayer")
+val keyPass = envOrDefault("KEY_PASSWORD", "rplayer-test")
 
 android {
     // Must match Kotlin source package (io.github.tytebyte_dev.rplayer)
