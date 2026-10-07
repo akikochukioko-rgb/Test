@@ -7,9 +7,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -22,6 +24,11 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
@@ -38,6 +45,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import coil.compose.AsyncImage
 import java.io.File
+import kotlin.math.roundToInt
 
 private fun iconModel(icon: String?): Any? =
     when {
@@ -121,6 +129,12 @@ fun RadioApp(
     var editing by remember { mutableStateOf<Station?>(null) }
     var showDialog by remember { mutableStateOf(false) }
     var menuExpanded by remember { mutableStateOf(false) }
+    var draggingId by remember { mutableStateOf<String?>(null) }
+    var dragOffsetY by remember { mutableFloatStateOf(0f) }
+    val listState = rememberLazyListState()
+    val density = LocalDensity.current
+    // Approximate row height for index calculation while dragging
+    val rowStridePx = with(density) { 88.dp.toPx() }
     val isMiui = remember { MiuiSupport.isMiuiOrHyperOs() }
 
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -336,13 +350,56 @@ fun RadioApp(
                 }
             } else {
                 LazyColumn(
+                    state = listState,
                     contentPadding = PaddingValues(12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(stations, key = { it.id }) { s ->
                         val active = currentId == s.id
+                        val isDragging = draggingId == s.id
                         Card(
-                            modifier = Modifier.fillMaxWidth().clickable { playStation(s) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .zIndex(if (isDragging) 1f else 0f)
+                                .graphicsLayer {
+                                    translationY = if (isDragging) dragOffsetY else 0f
+                                    shadowElevation = if (isDragging) 12f else 0f
+                                    alpha = if (isDragging) 0.95f else 1f
+                                }
+                                .pointerInput(s.id, stations.size) {
+                                    detectDragGesturesAfterLongPress(
+                                        onDragStart = {
+                                            draggingId = s.id
+                                            dragOffsetY = 0f
+                                        },
+                                        onDragEnd = {
+                                            draggingId = null
+                                            dragOffsetY = 0f
+                                            store.save(stations)
+                                        },
+                                        onDragCancel = {
+                                            draggingId = null
+                                            dragOffsetY = 0f
+                                            store.save(stations)
+                                        },
+                                        onDrag = { change, dragAmount ->
+                                            change.consume()
+                                            if (draggingId != s.id) return@detectDragGesturesAfterLongPress
+                                            dragOffsetY += dragAmount.y
+                                            val from = stations.indexOfFirst { it.id == s.id }
+                                            if (from < 0) return@detectDragGesturesAfterLongPress
+                                            val shift = (dragOffsetY / rowStridePx).toInt()
+                                            val to = (from + shift).coerceIn(0, stations.lastIndex)
+                                            if (to != from) {
+                                                val item = stations.removeAt(from)
+                                                stations.add(to, item)
+                                                // Keep finger alignment after list swap
+                                                dragOffsetY -= (to - from) * rowStridePx
+                                            }
+                                        }
+                                    )
+                                }
+                                .clickable(enabled = draggingId == null) { playStation(s) },
                             colors = CardDefaults.cardColors(
                                 containerColor = if (active) MaterialTheme.colorScheme.primaryContainer
                                 else MaterialTheme.colorScheme.surfaceVariant
