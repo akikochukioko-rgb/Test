@@ -1,21 +1,38 @@
-# Radio Player (Android)
-Нативное приложение (Kotlin + Jetpack Compose + Media3) для онлайн-радио. Список станций изначально пуст.
+# Rplayer
+
+**English** | [Русский](README.ru.md)
+
+Native Android internet radio player built with **Kotlin**, **Jetpack Compose**, and **Media3**.
+
+**Version:** 2.2 (`versionCode` 22)
 
 <p align="center">
-  <img src="screenshots/Screenshot_20261007-214458~2.jpg" alt="Список радиостанций" width="360" />
+  <img src="screenshots/Screenshot_20261007-214458~2.jpg" alt="Station list" width="360" />
 </p>
 
-- minSdk 29 (Android 10), targetSdk/compileSdk 36 (Android 16)
-- Package: `io.github.tytebyte_dev.rplayer`
-- Добавление/редактирование станции: ссылка на поток, название, иконка (URL или файл через SAF)
-- **Массовый импорт / экспорт** станций из JSON (меню ⋮)
-- При старте (API 33+): только `POST_NOTIFICATIONS` для фона/уведомления
-- Лог ошибок: app-specific `getExternalFilesDir()/log.txt` (без широких storage-разрешений)
-- Фоновое воспроизведение с уведомлением
-- HTTP и HTTPS-потоки; для HTTPS с просроченным/невалидным SSL соединение допускается
-- Бегущая строка «Играет: …» с метаданными трека (ICY)
+## Features
 
-## Формат импорта / экспорта
+- Empty station list on first launch — add your own streams
+- Add / edit stations: stream URL, name, icon (URL or file via SAF)
+- Drag-and-drop reorder (long-press a station)
+- Swipe to delete with confirmation
+- Bulk **import / export** stations as JSON (⋮ menu)
+- Background playback with media notification
+- ICY / stream metadata as a scrolling “Now playing: …” line
+- HTTP and HTTPS streams (invalid/expired SSL is allowed for HTTPS)
+- Optional MIUI / HyperOS helpers (autostart, battery)
+- Crash / playback log in app-specific external files dir (`log.txt`)
+- On first run (API 33+): only `POST_NOTIFICATIONS` is requested
+
+## Requirements
+
+| | |
+|--|--|
+| minSdk | 29 (Android 10) |
+| targetSdk / compileSdk | 36 (Android 16) |
+| Package | `io.github.tytebyte_dev.rplayer` |
+
+## Import / export format
 
 ```json
 {
@@ -26,31 +43,31 @@
 }
 ```
 
-Дубликаты по URL при импорте пропускаются.
+Duplicate URLs are skipped on import.
 
-## Сборка и подпись
+## Build & signing
 
-Debug и release подписываются **одним и тем же** release-keystore (без Android debug key).
+Debug and release builds use the **same** release keystore (no Android debug key).
 
-GitHub Actions — repository secrets:
+GitHub Actions repository secrets:
 
-| Secret | Описание |
-|--------|----------|
-| `KEYSTORE_BASE64` | Keystore в Base64 (`base64 -w0 release.keystore`) |
-| `KEYSTORE_PASSWORD` | Пароль хранилища |
-| `KEY_ALIAS` | Alias ключа |
-| `KEY_PASSWORD` | Пароль ключа |
+| Secret | Description |
+|--------|-------------|
+| `KEYSTORE_BASE64` | Keystore as Base64 (`base64 -w0 release.keystore`) |
+| `KEYSTORE_PASSWORD` | Keystore password |
+| `KEY_ALIAS` | Key alias |
+| `KEY_PASSWORD` | Key password |
 
-Локально (те же переменные окружения):
+Locally (same environment variables):
 
 ```bash
 export KEYSTORE_BASE64="$(base64 -w0 release.keystore)"
 export KEYSTORE_PASSWORD=...
 export KEY_ALIAS=...
 export KEY_PASSWORD=...
-gradle assembleDebug   # или assembleRelease
+gradle assembleDebug   # or assembleRelease
 ```
 
-## Лицензия
+## License
 
-[PolyForm Noncommercial License 1.0.0](LICENSE) — можно использовать, изменять и распространять **только в некоммерческих целях** (личное, хобби, учёба, исследования, НКО и т.п.). Коммерческое использование запрещено.
+[PolyForm Noncommercial License 1.0.0](LICENSE) — use, modify, and redistribute **for noncommercial purposes only** (personal, hobby, education, research, nonprofits, etc.). Commercial use is not allowed.
