@@ -4,5 +4,8 @@ local.properties
 .idea/
 *.iml
 
-# Generated from rplayer-test.keystore.b64 at build time
+# Generated / local keystores — never commit real keys
 app/rplayer-test.keystore
+app/release.keystore
+*.keystore
+!app/rplayer-test.keystore.b64

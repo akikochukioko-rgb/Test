@@ -6,17 +6,32 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-/** Decode committed base64 keystore once so every CI/local build uses the same signature. */
-fun ensureTestKeystore(): File {
+/**
+ * Prefer CI secrets (KEYSTORE_BASE64 + passwords).
+ * Fallback: committed test keystore for local debug builds.
+ */
+fun resolveKeystore(): File {
+    val fromEnv = System.getenv("KEYSTORE_FILE")
+    if (!fromEnv.isNullOrBlank()) {
+        val f = file(fromEnv)
+        if (f.exists()) return f
+    }
+    // Local / fallback test keystore
     val ks = file("rplayer-test.keystore")
     if (!ks.exists()) {
-        val b64 = file("rplayer-test.keystore.b64").readText().replace(Regex("\\s"), "")
-        ks.writeBytes(Base64.getDecoder().decode(b64))
+        val b64File = file("rplayer-test.keystore.b64")
+        if (b64File.exists()) {
+            val b64 = b64File.readText().replace(Regex("\\s"), "")
+            ks.writeBytes(Base64.getDecoder().decode(b64))
+        }
     }
     return ks
 }
 
-val testKeystore = ensureTestKeystore()
+val signingKeystore = resolveKeystore()
+val storePass = System.getenv("KEYSTORE_PASSWORD") ?: "rplayer-test"
+val keyAliasEnv = System.getenv("KEY_ALIAS") ?: "rplayer"
+val keyPass = System.getenv("KEY_PASSWORD") ?: "rplayer-test"
 
 android {
     namespace = "eu.akaiko.rplayer"
@@ -31,21 +46,28 @@ android {
     }
 
     signingConfigs {
+        create("release") {
+            storeFile = signingKeystore
+            storePassword = storePass
+            keyAlias = keyAliasEnv
+            keyPassword = keyPass
+        }
+        // Keep a named "test" config for clarity (same file when no secrets)
         create("test") {
-            storeFile = testKeystore
-            storePassword = "rplayer-test"
-            keyAlias = "rplayer"
-            keyPassword = "rplayer-test"
+            storeFile = signingKeystore
+            storePassword = storePass
+            keyAlias = keyAliasEnv
+            keyPassword = keyPass
         }
     }
 
     buildTypes {
         debug {
-            signingConfig = signingConfigs.getByName("test")
+            signingConfig = signingConfigs.getByName("release")
         }
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("test")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 
