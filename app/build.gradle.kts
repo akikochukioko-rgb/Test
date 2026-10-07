@@ -16,7 +16,6 @@ fun resolveKeystore(): File {
         val f = file(fromEnv)
         if (f.exists()) return f
     }
-    // Local / fallback test keystore
     val ks = file("rplayer-test.keystore")
     if (!ks.exists()) {
         val b64File = file("rplayer-test.keystore.b64")
@@ -34,10 +33,12 @@ val keyAliasEnv = System.getenv("KEY_ALIAS") ?: "rplayer"
 val keyPass = System.getenv("KEY_PASSWORD") ?: "rplayer-test"
 
 android {
-    namespace = "io.github.tytebyte_dev.rplayer"
+    // Must match Kotlin source package (eu.akaiko.rplayer)
+    namespace = "eu.akaiko.rplayer"
     compileSdk = 36
 
     defaultConfig {
+        // Public app id (installs / Play Store)
         applicationId = "io.github.tytebyte_dev.rplayer"
         minSdk = 29
         targetSdk = 36
@@ -52,7 +53,6 @@ android {
             keyAlias = keyAliasEnv
             keyPassword = keyPass
         }
-        // Keep a named "test" config for clarity (same file when no secrets)
         create("test") {
             storeFile = signingKeystore
             storePassword = storePass
