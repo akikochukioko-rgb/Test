@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
@@ -27,7 +28,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -45,7 +45,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import coil.compose.AsyncImage
 import java.io.File
-import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
 
 private fun iconModel(icon: String?): Any? =
     when {
@@ -129,6 +129,7 @@ fun RadioApp(
     var editing by remember { mutableStateOf<Station?>(null) }
     var showDialog by remember { mutableStateOf(false) }
     var menuExpanded by remember { mutableStateOf(false) }
+    var pendingDelete by remember { mutableStateOf<Station?>(null) }
     var draggingId by remember { mutableStateOf<String?>(null) }
     var dragOffsetY by remember { mutableFloatStateOf(0f) }
     val listState = rememberLazyListState()
@@ -357,6 +358,36 @@ fun RadioApp(
                     items(stations, key = { it.id }) { s ->
                         val active = currentId == s.id
                         val isDragging = draggingId == s.id
+                        val dismissState = rememberSwipeToDismissBoxState(
+                            confirmValueChange = { value ->
+                                if (value == SwipeToDismissBoxValue.EndToStart && draggingId == null) {
+                                    pendingDelete = s
+                                }
+                                // Never fully dismiss row — deletion only after dialog confirm
+                                false
+                            }
+                        )
+                        SwipeToDismissBox(
+                            state = dismissState,
+                            enableDismissFromStartToEnd = false,
+                            enableDismissFromEndToStart = draggingId == null,
+                            backgroundContent = {
+                                val color = MaterialTheme.colorScheme.errorContainer
+                                Box(
+                                    Modifier
+                                        .fillMaxSize()
+                                        .background(color)
+                                        .padding(horizontal = 20.dp),
+                                    contentAlignment = Alignment.CenterEnd
+                                ) {
+                                    Icon(
+                                        Icons.Default.Delete,
+                                        contentDescription = AppStrings.t("delete"),
+                                        tint = MaterialTheme.colorScheme.onErrorContainer
+                                    )
+                                }
+                            }
+                        ) {
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -460,20 +491,9 @@ fun RadioApp(
                                 }) {
                                     Icon(Icons.Default.Edit, contentDescription = AppStrings.t("edit"))
                                 }
-                                IconButton(onClick = {
-                                    if (currentId == s.id) {
-                                        controller?.stop()
-                                        currentId = null
-                                        nowPlaying = null
-                                    }
-                                    store.deleteIconFile(s.icon)
-                                    stations.remove(s)
-                                    store.save(stations)
-                                }) {
-                                    Icon(Icons.Default.Delete, contentDescription = AppStrings.t("delete"))
-                                }
                             }
                         }
+                        } // SwipeToDismissBox
                     }
                 }
             }
@@ -493,6 +513,65 @@ fun RadioApp(
             }
         )
     }
+
+    pendingDelete?.let { station ->
+        DeleteConfirmDialog(
+            stationName = station.name,
+            onDismiss = { pendingDelete = null },
+            onConfirm = {
+                if (currentId == station.id) {
+                    controller?.stop()
+                    currentId = null
+                    nowPlaying = null
+                }
+                store.deleteIconFile(station.icon)
+                stations.removeAll { it.id == station.id }
+                store.save(stations)
+                pendingDelete = null
+            }
+        )
+    }
+}
+
+@Composable
+private fun DeleteConfirmDialog(
+    stationName: String,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    var secondsLeft by remember { mutableIntStateOf(10) }
+    LaunchedEffect(stationName) {
+        secondsLeft = 10
+        while (secondsLeft > 0) {
+            delay(1_000)
+            secondsLeft--
+        }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(AppStrings.t("delete_confirm_title")) },
+        text = {
+            Text(AppStrings.t("delete_confirm_message").format(stationName))
+        },
+        confirmButton = {
+            TextButton(
+                enabled = secondsLeft == 0,
+                onClick = onConfirm
+            ) {
+                Text(
+                    if (secondsLeft > 0)
+                        AppStrings.t("delete_yes_timer").format(secondsLeft)
+                    else
+                        AppStrings.t("delete_yes")
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(AppStrings.t("cancel"))
+            }
+        }
+    )
 }
 
 @Composable
