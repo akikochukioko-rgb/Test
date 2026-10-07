@@ -7,6 +7,7 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
@@ -21,10 +22,22 @@ import javax.net.ssl.X509TrustManager
 
 class PlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
+    private var reconnect: ReconnectListener? = null
 
     override fun onCreate() {
         super.onCreate()
+        // Небольшие буферы для живого радио: быстрый старт и быстрое восстановление
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                /* minBufferMs = */ 15_000,
+                /* maxBufferMs = */ 50_000,
+                /* bufferForPlaybackMs = */ 2_500,
+                /* bufferForPlaybackAfterRebufferMs = */ 5_000
+            )
+            .build()
+
         val player = ExoPlayer.Builder(this)
+            .setLoadControl(loadControl)
             .setMediaSourceFactory(
                 DefaultMediaSourceFactory(this)
                     .setDataSourceFactory(permissiveHttpDataSourceFactory())
@@ -39,6 +52,9 @@ class PlaybackService : MediaSessionService() {
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
+
+        player.addListener(StreamMetadataUpdater(player))
+        reconnect = ReconnectListener(player).also { player.addListener(it) }
 
         val launch = Intent(this, MainActivity::class.java).apply {
             action = Intent.ACTION_MAIN
@@ -76,7 +92,7 @@ class PlaybackService : MediaSessionService() {
             .followSslRedirects(true)
             .build()
         return OkHttpDataSource.Factory(client)
-            .setUserAgent("RadioPlayer/1.8 (Android; Media3)")
+            .setUserAgent("RadioPlayer/1.9 (Android; Media3)")
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo) = session
@@ -89,6 +105,8 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        reconnect?.release()
+        reconnect = null
         session?.run {
             player.release()
             release()
