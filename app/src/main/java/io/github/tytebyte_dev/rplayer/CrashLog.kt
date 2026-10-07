@@ -12,64 +12,95 @@ import java.util.Locale
 
 /**
  * Appends crash / error reports preferably to `/storage/emulated/0/rplayer/log.txt`.
- * Falls back to app filesDir when external storage is blocked (common on MIUI without all-files access).
+ * Falls back to app-private filesDir if external storage is not writable yet.
  */
 object CrashLog {
     private const val TAG = "CrashLog"
     private const val DIR_NAME = "rplayer"
     private const val FILE_NAME = "log.txt"
+    private const val MAX_BYTES = 512 * 1024
 
-    @Volatile private var appContext: Context? = null
+    private val timeFmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
+
+    @Volatile
+    private var appContext: Context? = null
 
     fun init(context: Context) {
         appContext = context.applicationContext
+    }
+
+    /** Preferred external path (may be unwritable without all-files access). */
+    val externalLogFile: File
+        get() = File(File(Environment.getExternalStorageDirectory(), DIR_NAME), FILE_NAME)
+
+    private fun resolveLogFile(): File? {
+        // 1) External public path
+        try {
+            val external = externalLogFile
+            val dir = external.parentFile
+            if (dir != null && (dir.exists() || dir.mkdirs()) && (external.canWrite() || !external.exists())) {
+                return external
+            }
+        } catch (_: Throwable) {
+        }
+        // 2) App-private fallback (always available)
+        return try {
+            val ctx = appContext ?: return null
+            File(ctx.filesDir, FILE_NAME)
+        } catch (_: Throwable) {
+            null
+        }
     }
 
     fun installDefaultHandler() {
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             try {
-                append("CRASH", "Uncaught on ${thread.name}", throwable)
-            } catch (_: Exception) { /* never block crash path */ }
-            previous?.uncaughtException(thread, throwable)
-        }
-    }
-
-    fun append(tag: String, message: String, error: Throwable? = null) {
-        val ts = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(Date())
-        val sb = StringBuilder()
-        sb.append("[").append(ts).append("] [").append(tag).append("] ").append(message).append('\n')
-        if (error != null) {
-            val sw = StringWriter()
-            error.printStackTrace(PrintWriter(sw))
-            sb.append(sw.toString()).append('\n')
-        }
-        sb.append("-" .repeat(40)).append('\n')
-        val text = sb.toString()
-        Log.e(TAG, message, error)
-        writeToPreferredLocation(text)
-    }
-
-    private fun writeToPreferredLocation(text: String) {
-        // 1) Prefer public external path requested by user
-        try {
-            val ext = Environment.getExternalStorageDirectory()
-            val dir = File(ext, DIR_NAME)
-            if (!dir.exists()) dir.mkdirs()
-            if (dir.exists() && dir.canWrite()) {
-                File(dir, FILE_NAME).appendText(text)
-                return
+                append("UNCAUGHT", "Thread: ${thread.name}", throwable)
+            } catch (_: Throwable) {
             }
-        } catch (e: Exception) {
-            Log.w(TAG, "external log failed: ${e.message}")
+            try {
+                previous?.uncaughtException(thread, throwable)
+                    ?: run {
+                        android.os.Process.killProcess(android.os.Process.myPid())
+                        System.exit(10)
+                    }
+            } catch (_: Throwable) {
+                android.os.Process.killProcess(android.os.Process.myPid())
+            }
         }
-        // 2) Fallback: app-private filesDir
+    }
+
+    fun append(kind: String, message: String? = null, error: Throwable? = null) {
         try {
-            val ctx = appContext ?: return
-            val dir = File(ctx.filesDir, DIR_NAME).apply { mkdirs() }
-            File(dir, FILE_NAME).appendText(text)
-        } catch (e: Exception) {
-            Log.e(TAG, "filesDir log failed: ${e.message}")
+            val file = resolveLogFile() ?: return
+            val body = buildString {
+                append("==== ").append(kind).append(' ')
+                append(timeFmt.format(Date())).append(" ====\n")
+                if (!message.isNullOrBlank()) append(message).append('\n')
+                if (error != null) {
+                    val sw = StringWriter()
+                    error.printStackTrace(PrintWriter(sw))
+                    append(sw.toString())
+                }
+                append('\n')
+            }
+            file.appendText(body, Charsets.UTF_8)
+            trimIfNeeded(file)
+        } catch (e: Throwable) {
+            Log.e(TAG, "Failed to write crash log", e)
+        }
+    }
+
+    private fun trimIfNeeded(file: File) {
+        try {
+            if (!file.exists() || file.length() <= MAX_BYTES) return
+            val text = file.readText(Charsets.UTF_8)
+            val cut = text.length - MAX_BYTES / 2
+            if (cut <= 0) return
+            val idx = text.indexOf("\n==== ", cut).takeIf { it >= 0 } ?: cut
+            file.writeText(text.substring(idx), Charsets.UTF_8)
+        } catch (_: Throwable) {
         }
     }
 }
