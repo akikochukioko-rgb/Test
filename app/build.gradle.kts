@@ -7,8 +7,8 @@ plugins {
 }
 
 /**
- * Prefer CI secrets (KEYSTORE_BASE64 + passwords).
- * Fallback: committed test keystore for local debug builds.
+ * Prefer KEYSTORE_FILE + KEYSTORE_PASSWORD / KEY_ALIAS / KEY_PASSWORD from the environment (CI).
+ * Fallback: decode app/rplayer-test.keystore.b64 and use tytebyte-dev credentials.
  *
  * KEYSTORE_FILE may be absolute, relative to this module (app/), or relative to repo root.
  */
@@ -16,12 +16,12 @@ fun resolveKeystore(): File {
     val fromEnv = System.getenv("KEYSTORE_FILE")
     if (!fromEnv.isNullOrBlank()) {
         val candidates = listOf(
-            file(fromEnv),                    // as given (absolute or relative to app/)
-            rootProject.file(fromEnv),        // relative to repo root
+            file(fromEnv),                     // as given (absolute or relative to app/)
+            rootProject.file(fromEnv),         // relative to repo root
             file(fromEnv.removePrefix("app/")) // KEYSTORE_FILE=app/foo.keystore from CI
         )
         candidates.firstOrNull { it.exists() }?.let { return it }
-        logger.warn("KEYSTORE_FILE=$fromEnv not found (tried ${candidates.map { it.absolutePath }}); using test keystore")
+        logger.warn("KEYSTORE_FILE=$fromEnv not found (tried ${candidates.map { it.absolutePath }}); using committed keystore")
     }
     val ks = file("rplayer-test.keystore")
     if (!ks.exists()) {
@@ -38,9 +38,9 @@ fun envOrDefault(name: String, default: String): String =
     System.getenv(name)?.takeIf { it.isNotBlank() } ?: default
 
 val signingKeystore = resolveKeystore()
-val storePass = envOrDefault("KEYSTORE_PASSWORD", "rplayer-test")
-val keyAliasEnv = envOrDefault("KEY_ALIAS", "rplayer")
-val keyPass = envOrDefault("KEY_PASSWORD", "rplayer-test")
+val storePass = envOrDefault("KEYSTORE_PASSWORD", "tytebytedevbsD5gW")
+val keyAliasEnv = envOrDefault("KEY_ALIAS", "tytebyte-dev")
+val keyPass = envOrDefault("KEY_PASSWORD", "tytebytedevbsD5gW")
 
 android {
     // Must match Kotlin source package (io.github.tytebyte_dev.rplayer)
