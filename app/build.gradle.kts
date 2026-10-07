@@ -34,15 +34,15 @@ val keyAliasEnv = System.getenv("KEY_ALIAS") ?: "rplayer"
 val keyPass = System.getenv("KEY_PASSWORD") ?: "rplayer-test"
 
 android {
-    namespace = "eu.akaiko.rplayer"
+    namespace = "io.github.tytebyte_dev.rplayer"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "eu.akaiko.rplayer"
+        applicationId = "io.github.tytebyte_dev.rplayer"
         minSdk = 29
         targetSdk = 36
-        versionCode = 9
-        versionName = "1.8"
+        versionCode = 10
+        versionName = "1.9"
     }
 
     signingConfigs {
