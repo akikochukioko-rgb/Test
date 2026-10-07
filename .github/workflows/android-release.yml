@@ -35,7 +35,7 @@ jobs:
 
       # Signing: if KEYSTORE_BASE64 is set, use it + KEYSTORE_PASSWORD / KEY_ALIAS / KEY_PASSWORD.
       # Otherwise fall back to committed test keystore (passwords rplayer-test / alias rplayer).
-      # Do NOT mix secrets passwords with the test keystore — that causes "password was incorrect".
+      # KEYSTORE_FILE must be absolute — app/build.gradle.kts resolves paths relative to the app/ module.
       - name: Decode release keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
@@ -44,15 +44,15 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 -d > app/release.keystore
-            echo "KEYSTORE_FILE=app/release.keystore" >> "$GITHUB_ENV"
+            KS="$GITHUB_WORKSPACE/app/release.keystore"
+            echo "$KEYSTORE_BASE64" | base64 -d > "$KS"
+            echo "KEYSTORE_FILE=$KS" >> "$GITHUB_ENV"
             echo "KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
             echo "KEY_ALIAS=${KEY_ALIAS:-rplayer}" >> "$GITHUB_ENV"
             echo "KEY_PASSWORD=${KEY_PASSWORD:-$KEYSTORE_PASSWORD}" >> "$GITHUB_ENV"
-            echo "Using GitHub Secrets keystore"
+            echo "Using GitHub Secrets keystore at $KS"
           else
             echo "KEYSTORE_BASE64 secret not set — falling back to test keystore (rplayer-test)"
-            # Leave KEYSTORE_* unset so build.gradle.kts uses defaults
           fi
 
       - name: Build release APK
