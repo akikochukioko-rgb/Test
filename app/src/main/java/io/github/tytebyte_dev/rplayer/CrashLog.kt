@@ -1,7 +1,6 @@
 package io.github.tytebyte_dev.rplayer
 
 import android.content.Context
-import android.os.Environment
 import android.util.Log
 import java.io.File
 import java.io.PrintWriter
@@ -11,12 +10,12 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Appends crash / error reports preferably to `/storage/emulated/0/rplayer/log.txt`.
- * Falls back to app-private filesDir if external storage is not writable yet.
+ * Appends crash / error reports to app-specific storage (no runtime permission):
+ * prefer [Context.getExternalFilesDir], fall back to [Context.getFilesDir].
+ * Path example: Android/data/io.github.tytebyte_dev.rplayer/files/log.txt
  */
 object CrashLog {
     private const val TAG = "CrashLog"
-    private const val DIR_NAME = "rplayer"
     private const val FILE_NAME = "log.txt"
     private const val MAX_BYTES = 512 * 1024
 
@@ -29,23 +28,26 @@ object CrashLog {
         appContext = context.applicationContext
     }
 
-    /** Preferred external path (may be unwritable without all-files access). */
-    val externalLogFile: File
-        get() = File(File(Environment.getExternalStorageDirectory(), DIR_NAME), FILE_NAME)
+    /** App-specific external log file (visible via USB / Files without special grants). */
+    val externalLogFile: File?
+        get() {
+            val ctx = appContext ?: return null
+            val dir = ctx.getExternalFilesDir(null) ?: return null
+            return File(dir, FILE_NAME)
+        }
 
     private fun resolveLogFile(): File? {
-        // 1) External public path
+        val ctx = appContext ?: return null
+        // 1) App-specific external (no permission; survives uninstall with clear data policies)
         try {
-            val external = externalLogFile
-            val dir = external.parentFile
-            if (dir != null && (dir.exists() || dir.mkdirs()) && (external.canWrite() || !external.exists())) {
-                return external
+            val external = ctx.getExternalFilesDir(null)
+            if (external != null && (external.exists() || external.mkdirs())) {
+                return File(external, FILE_NAME)
             }
         } catch (_: Throwable) {
         }
-        // 2) App-private fallback (always available)
+        // 2) Internal filesDir (always available)
         return try {
-            val ctx = appContext ?: return null
             File(ctx.filesDir, FILE_NAME)
         } catch (_: Throwable) {
             null

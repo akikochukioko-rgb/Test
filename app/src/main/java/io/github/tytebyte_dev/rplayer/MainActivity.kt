@@ -1,12 +1,8 @@
 package io.github.tytebyte_dev.rplayer
 
 import android.Manifest
-import android.content.Intent
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.Environment
-import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -49,25 +45,23 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 
 class MainActivity : ComponentActivity() {
 
-    private val photoPermLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-            requestAllFilesAccessSafely()
-        }
+    /** Only POST_NOTIFICATIONS on API 33+ (media playback notification). */
+    private val notificationPermLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* no-op */ }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AppStrings.lang = LangPrefs.load(this)
         try {
-            if (savedInstanceState == null) requestPermissionsAtStart()
+            if (savedInstanceState == null) requestNotificationPermissionIfNeeded()
         } catch (t: Throwable) {
-            CrashLog.append("MAIN", "requestPermissionsAtStart failed", t)
+            CrashLog.append("MAIN", "requestNotificationPermissionIfNeeded failed", t)
         }
         setContent {
             var themeMode by remember { mutableStateOf(ThemePrefs.load(this@MainActivity)) }
@@ -137,33 +131,9 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun requestPermissionsAtStart() {
-        val perms = mutableListOf<String>()
+    private fun requestNotificationPermissionIfNeeded() {
         if (Build.VERSION.SDK_INT >= 33) {
-            perms += Manifest.permission.READ_MEDIA_IMAGES
-            perms += Manifest.permission.POST_NOTIFICATIONS
-        } else {
-            perms += Manifest.permission.READ_EXTERNAL_STORAGE
-        }
-        if (perms.isNotEmpty()) photoPermLauncher.launch(perms.toTypedArray())
-        else requestAllFilesAccessSafely()
-    }
-
-    private fun requestAllFilesAccessSafely() {
-        try {
-            if (Environment.isExternalStorageManager()) return
-            val uri = Uri.parse("package:$packageName")
-            try {
-                startActivity(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, uri))
-            } catch (_: Exception) {
-                try {
-                    startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
-                } catch (e: Exception) {
-                    CrashLog.append("MAIN", "Cannot open all-files settings", e)
-                }
-            }
-        } catch (t: Throwable) {
-            CrashLog.append("MAIN", "requestAllFilesAccess failed", t)
+            notificationPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 }
