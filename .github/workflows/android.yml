@@ -27,17 +27,18 @@ jobs:
         with:
           gradle-version: "8.12"
 
-      # Always use the committed test keystore (app/rplayer-test.keystore.b64).
-      # Password: rplayer-test, alias: rplayer
-      - name: Decode test keystore
+      # Decode committed keystore (app/rplayer-test.keystore.b64)
+      # KEYSTORE_PASSWORD / KEY_PASSWORD: tytebytedevbsD5gW
+      # KEY_ALIAS: tytebyte-dev
+      - name: Decode keystore
         run: |
           KS="$GITHUB_WORKSPACE/app/rplayer-test.keystore"
           base64 -d "$GITHUB_WORKSPACE/app/rplayer-test.keystore.b64" > "$KS"
           echo "KEYSTORE_FILE=$KS" >> "$GITHUB_ENV"
-          echo "KEYSTORE_PASSWORD=rplayer-test" >> "$GITHUB_ENV"
-          echo "KEY_ALIAS=rplayer" >> "$GITHUB_ENV"
-          echo "KEY_PASSWORD=rplayer-test" >> "$GITHUB_ENV"
-          echo "Using committed test keystore: $KS"
+          echo "KEYSTORE_PASSWORD=tytebytedevbsD5gW" >> "$GITHUB_ENV"
+          echo "KEY_ALIAS=tytebyte-dev" >> "$GITHUB_ENV"
+          echo "KEY_PASSWORD=tytebytedevbsD5gW" >> "$GITHUB_ENV"
+          echo "Using keystore: $KS (alias=tytebyte-dev)"
 
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon
