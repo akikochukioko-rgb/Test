@@ -33,8 +33,8 @@ val keyAliasEnv = System.getenv("KEY_ALIAS") ?: "rplayer"
 val keyPass = System.getenv("KEY_PASSWORD") ?: "rplayer-test"
 
 android {
-    // Must match Kotlin source package (eu.akaiko.rplayer)
-    namespace = "eu.akaiko.rplayer"
+    // Must match Kotlin source package (io.github.tytebyte_dev.rplayer)
+    namespace = "io.github.tytebyte_dev.rplayer"
     compileSdk = 36
 
     defaultConfig {
