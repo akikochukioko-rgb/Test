@@ -1,15 +1,11 @@
 name: Android Release
 
 on:
-  # Create a release when a version tag is pushed, e.g. v1.9 or v1.9.0
-  push:
-    tags:
-      - "v*"
-  # Or run manually from the Actions tab
+  # Only manual run from the Actions tab
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag (e.g. v1.9). Leave empty to use run id."
+        description: "Release tag (e.g. v1.9). Leave empty to use build-<run_number>."
         required: false
         type: string
 
@@ -66,17 +62,14 @@ jobs:
           fi
           echo "path=$APK" >> "$GITHUB_OUTPUT"
 
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.tag }}" ]; then
+          if [ -n "${{ inputs.tag }}" ]; then
             TAG="${{ inputs.tag }}"
-          elif [ "${{ github.ref_type }}" = "tag" ]; then
-            TAG="${{ github.ref_name }}"
           else
             TAG="build-${{ github.run_number }}"
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
           # e.g. RadioPlayer-v1.9.apk
-          BASE=$(basename "$APK" .apk)
           OUT="RadioPlayer-${TAG}.apk"
           cp "$APK" "$OUT"
           echo "upload=$OUT" >> "$GITHUB_OUTPUT"
