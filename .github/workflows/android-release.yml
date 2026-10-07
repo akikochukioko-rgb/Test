@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag (e.g. v1.9). Leave empty to use build-<run_number>."
+        description: "Release tag (e.g. v1.9 or 1.9-v2). Leave empty to use build-<run_number>. No spaces."
         required: false
         type: string
 
@@ -60,7 +60,11 @@ jobs:
           echo "path=$APK" >> "$GITHUB_OUTPUT"
 
           if [ -n "${{ inputs.tag }}" ]; then
-            TAG="${{ inputs.tag }}"
+            # Git tags cannot contain spaces or many special chars
+            TAG=$(echo "${{ inputs.tag }}" | tr ' ' '-' | tr -cd 'A-Za-z0-9._-')
+            if [ -z "$TAG" ]; then
+              TAG="build-${{ github.run_number }}"
+            fi
           else
             TAG="build-${{ github.run_number }}"
           fi
