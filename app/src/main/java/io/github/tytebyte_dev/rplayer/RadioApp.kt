@@ -30,14 +30,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
-import androidx.media3.common.Metadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
-import androidx.media3.extractor.metadata.icy.IcyInfo
-import androidx.media3.extractor.metadata.id3.TextInformationFrame
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import coil.compose.AsyncImage
@@ -120,6 +116,8 @@ fun RadioApp(
     var nowPlaying by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var statusMsg by remember { mutableStateOf<String?>(null) }
+    var reconnecting by remember { mutableStateOf(false) }
+    var reconnectAttempts by remember { mutableIntStateOf(0) }
     var editing by remember { mutableStateOf<Station?>(null) }
     var showDialog by remember { mutableStateOf(false) }
     var menuExpanded by remember { mutableStateOf(false) }
@@ -157,7 +155,18 @@ fun RadioApp(
             ctx, SessionToken(ctx, ComponentName(ctx, PlaybackService::class.java))
         ).buildAsync()
         future.addListener({
-            try { controller = future.get() } catch (_: Exception) {}
+            try {
+                val c = future.get()
+                controller = c
+                // Restore UI from live session (app reopened while radio plays)
+                isPlaying = c.isPlaying
+                buffering = c.playbackState == Player.STATE_BUFFERING
+                currentId = c.currentMediaItem?.mediaId
+                if (c.isPlaying) {
+                    error = null
+                    reconnecting = false
+                }
+            } catch (_: Exception) {}
         }, ContextCompat.getMainExecutor(ctx))
         onDispose {
             controller?.release()
@@ -171,22 +180,24 @@ fun RadioApp(
             override fun onIsPlayingChanged(playing: Boolean) {
                 isPlaying = playing
                 if (playing) {
-                    // Reconnect success: clear soft error and restore highlight from player
                     error = null
                     statusMsg = null
+                    reconnecting = false
+                    reconnectAttempts = 0
                     c.currentMediaItem?.mediaId?.let { currentId = it }
                 }
             }
             override fun onPlaybackStateChanged(state: Int) {
                 buffering = state == Player.STATE_BUFFERING
-                // STATE_IDLE is normal during reconnect/prepare — do not clear currentId
-                // while the user still wants playback (playWhenReady).
+                // STATE_IDLE is normal during reconnect/prepare — keep currentId if still wanting play
                 if (state == Player.STATE_ENDED) {
                     currentId = null
                     nowPlaying = null
+                    reconnecting = false
                 } else if (state == Player.STATE_IDLE && !c.playWhenReady) {
                     currentId = null
                     nowPlaying = null
+                    reconnecting = false
                 }
             }
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
@@ -198,64 +209,34 @@ fun RadioApp(
                 val formatted = formatNowPlaying(mediaMetadata, stationName)
                 if (formatted != null) nowPlaying = formatted
             }
-            override fun onMetadata(metadata: Metadata) {
-                val stationName = stations.find { it.id == currentId }?.name
-                for (i in 0 until metadata.length()) {
-                    when (val entry = metadata.get(i)) {
-                        is IcyInfo -> {
-                            val t = entry.title?.trim().orEmpty()
-                            if (t.isNotEmpty()) {
-                                val formatted = formatNowPlaying(
-                                    MediaMetadata.Builder().setTitle(t).build(),
-                                    stationName
-                                )
-                                if (formatted != null) {
-                                    nowPlaying = formatted
-                                    return
-                                }
-                            }
-                        }
-                        is TextInformationFrame -> {
-                            val id = entry.id
-                            val values = entry.values
-                            if (values.isEmpty()) continue
-                            if (id == "TIT2" || id == "TT2") {
-                                val t = values[0].trim()
-                                if (t.isNotEmpty()) {
-                                    val formatted = formatNowPlaying(
-                                        MediaMetadata.Builder().setTitle(t).build(),
-                                        stationName
-                                    )
-                                    if (formatted != null) nowPlaying = formatted
-                                }
-                            } else if (id == "TPE1" || id == "TP1") {
-                                val a = values[0].trim()
-                                val cur = nowPlaying
-                                if (a.isNotEmpty() && !cur.isNullOrBlank() && !cur.contains(a)) {
-                                    nowPlaying = "$a — $cur"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            // Stream metadata is applied in PlaybackService (StreamMetadataUpdater);
+            // MediaController does not receive raw ICY/ID3 onMetadata callbacks.
             override fun onPlayerError(e: PlaybackException) {
                 val id = currentId ?: c.currentMediaItem?.mediaId
                 val station = stations.find { it.id == id }
                 val info = "station=${station?.name ?: "?"} url=${station?.streamUrl ?: "?"}"
                 CrashLog.append("PLAYER", "Playback error ($info)", e)
-                // Keep currentId while auto-reconnect may recover (playWhenReady).
-                // Only surface a hard error when user paused/stopped or item is gone.
+                // Mirror ReconnectListener maxAttempts (10): soft UI only while retries remain
                 if (c.playWhenReady && id != null) {
                     currentId = id
                     nowPlaying = null
-                    error = null
-                    statusMsg = AppStrings.t("reconnecting")
+                    reconnectAttempts++
+                    if (reconnectAttempts >= 10) {
+                        reconnecting = false
+                        statusMsg = null
+                        error = e.message ?: AppStrings.t("playback_error")
+                    } else {
+                        error = null
+                        reconnecting = true
+                        statusMsg = AppStrings.t("reconnecting")
+                    }
                 } else {
                     error = e.message ?: AppStrings.t("playback_error")
                     currentId = null
                     nowPlaying = null
                     statusMsg = null
+                    reconnecting = false
+                    reconnectAttempts = 0
                 }
             }
         })
@@ -265,15 +246,15 @@ fun RadioApp(
         val c = controller ?: return
         error = null
         statusMsg = null
+        reconnecting = false
+        reconnectAttempts = 0
         if (currentId == s.id) {
             if (c.isPlaying) c.pause() else c.play()
             return
         }
         nowPlaying = null
-        val index = stations.indexOfFirst { it.id == s.id }.coerceAtLeast(0)
-        val items = stations.map { stationMediaItem(it) }
-        if (items.isEmpty()) return
-        c.setMediaItems(items, index, C.TIME_UNSET)
+        // Single item only — full playlist would auto-advance when a stream ends
+        c.setMediaItem(stationMediaItem(s), /* resetPosition = */ true)
         c.prepare()
         c.play()
         currentId = s.id
@@ -396,8 +377,7 @@ fun RadioApp(
                                             if (track.isNullOrBlank()) AppStrings.t("playing")
                                             else AppStrings.t("playing_prefix").format(track)
                                         }
-                                        active && statusMsg == AppStrings.t("reconnecting") ->
-                                            AppStrings.t("reconnecting")
+                                        active && reconnecting -> AppStrings.t("reconnecting")
                                         else -> s.streamUrl
                                     }
                                     Text(
@@ -468,14 +448,17 @@ private fun StationDialog(
     var name by remember { mutableStateOf(initial?.name ?: "") }
     var url by remember { mutableStateOf(initial?.streamUrl ?: "") }
     var iconUrl by remember { mutableStateOf(initial?.icon?.takeIf { it.startsWith("http") } ?: "") }
+    // Existing saved icon (path or http); local file copy deferred until Save
     var icon by remember { mutableStateOf(initial?.icon) }
+    var pendingIconUri by remember { mutableStateOf<Uri?>(null) }
     val oldIcon = initial?.icon
     val valid = url.trim().startsWith("http://") || url.trim().startsWith("https://")
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        icon = store.importIcon(uri) ?: icon
+        pendingIconUri = uri
         iconUrl = ""
+        icon = null // preview from pendingIconUri
     }
 
     AlertDialog(
@@ -501,6 +484,7 @@ private fun StationDialog(
                     value = iconUrl,
                     onValueChange = {
                         iconUrl = it
+                        pendingIconUri = null
                         icon = it.trim().takeIf { u -> u.startsWith("http") }
                     },
                     label = { Text(AppStrings.t("icon_url")) },
@@ -514,7 +498,8 @@ private fun StationDialog(
                     TextButton(onClick = { picker.launch("image/*") }) {
                         Text(AppStrings.t("pick_file"))
                     }
-                    icon?.let {
+                    val preview = pendingIconUri ?: iconModel(icon)
+                    preview?.let {
                         AsyncImage(
                             it, null,
                             Modifier.size(48.dp).clip(RoundedCornerShape(10.dp)),
@@ -528,13 +513,18 @@ private fun StationDialog(
             TextButton(
                 enabled = valid,
                 onClick = {
-                    if (oldIcon != null && oldIcon != icon) store.deleteIconFile(oldIcon)
+                    val resolvedIcon = when {
+                        pendingIconUri != null -> store.importIcon(pendingIconUri!!)
+                        iconUrl.trim().startsWith("http") -> iconUrl.trim()
+                        else -> icon
+                    }
+                    if (oldIcon != null && oldIcon != resolvedIcon) store.deleteIconFile(oldIcon)
                     onSave(
                         Station(
                             id = initial?.id ?: java.util.UUID.randomUUID().toString(),
                             name = name.trim().ifBlank { url.trim() },
                             streamUrl = url.trim(),
-                            icon = icon
+                            icon = resolvedIcon
                         )
                     )
                 }
