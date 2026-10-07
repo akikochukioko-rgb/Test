@@ -8,23 +8,30 @@ import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
@@ -81,12 +88,8 @@ class MainActivity : ComponentActivity() {
             }
 
             MaterialTheme(colorScheme = scheme) {
-                RadioApp(
-                    onOpenSettings = { showSettings = true },
-                    langTick = langTick
-                )
                 if (showSettings) {
-                    SettingsDialog(
+                    SettingsScreen(
                         themeMode = themeMode,
                         lang = lang,
                         requireThemeChoice = firstRun && !ThemePrefs.isChosen(this@MainActivity),
@@ -100,11 +103,16 @@ class MainActivity : ComponentActivity() {
                             lang = l
                             langTick++
                         },
-                        onDismiss = {
+                        onBack = {
                             if (ThemePrefs.isChosen(this@MainActivity)) {
                                 showSettings = false
                             }
                         }
+                    )
+                } else {
+                    RadioApp(
+                        onOpenSettings = { showSettings = true },
+                        langTick = langTick
                     )
                 }
             }
@@ -142,101 +150,112 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SettingsDialog(
+private fun SettingsScreen(
     themeMode: AppThemeMode,
     lang: AppLang,
     requireThemeChoice: Boolean,
     onThemeSelected: (AppThemeMode) -> Unit,
     onLangSelected: (AppLang) -> Unit,
-    onDismiss: () -> Unit
+    onBack: () -> Unit
 ) {
-    AlertDialog(
-        onDismissRequest = { if (!requireThemeChoice) onDismiss() },
-        title = { Text(AppStrings.t("settings")) },
-        text = {
-            Column(
-                Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    AppStrings.t("theme_section"),
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Text(
-                    AppStrings.t("theme_hint"),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                HorizontalDivider(Modifier.padding(vertical = 4.dp))
-                AppThemeMode.entries.forEach { mode ->
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .selectable(
-                                selected = themeMode == mode,
-                                onClick = { onThemeSelected(mode) },
-                                role = Role.RadioButton
+    val ctx = LocalContext.current
+    val canLeave = !requireThemeChoice || ThemePrefs.isChosen(ctx)
+
+    // System back: only leave when theme is chosen (first-run gate)
+    BackHandler(enabled = canLeave) { onBack() }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(AppStrings.t("settings")) },
+                navigationIcon = {
+                    if (canLeave) {
+                        IconButton(onClick = onBack) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = AppStrings.t("back")
                             )
-                            .padding(vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(
-                            selected = themeMode == mode,
-                            onClick = { onThemeSelected(mode) }
-                        )
-                        Text(
-                            mode.label(),
-                            modifier = Modifier.padding(start = 8.dp),
-                            style = MaterialTheme.typography.bodyLarge
-                        )
+                        }
                     }
                 }
-
-                HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                Text(
-                    AppStrings.t("lang_section"),
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                AppLang.entries.forEach { l ->
-                    val label = if (l == AppLang.RU) AppStrings.t("lang_ru") else AppStrings.t("lang_en")
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .selectable(
-                                selected = lang == l,
-                                onClick = { onLangSelected(l) },
-                                role = Role.RadioButton
-                            )
-                            .padding(vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(
-                            selected = lang == l,
-                            onClick = { onLangSelected(l) }
+            )
+        }
+    ) { pad ->
+        Column(
+            Modifier
+                .padding(pad)
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                AppStrings.t("theme_section"),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                AppStrings.t("theme_hint"),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            HorizontalDivider(Modifier.padding(vertical = 4.dp))
+            AppThemeMode.entries.forEach { mode ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .selectable(
+                            selected = themeMode == mode,
+                            onClick = { onThemeSelected(mode) },
+                            role = Role.RadioButton
                         )
-                        Text(
-                            label,
-                            modifier = Modifier.padding(start = 8.dp),
-                            style = MaterialTheme.typography.bodyLarge
-                        )
-                    }
+                        .padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(
+                        selected = themeMode == mode,
+                        onClick = { onThemeSelected(mode) }
+                    )
+                    Text(
+                        mode.label(),
+                        modifier = Modifier.padding(start = 8.dp),
+                        style = MaterialTheme.typography.bodyLarge
+                    )
                 }
             }
-        },
-        confirmButton = {
-            val ctx = LocalContext.current
-            TextButton(
-                enabled = !requireThemeChoice || ThemePrefs.isChosen(ctx),
-                onClick = onDismiss
-            ) {
-                Text(
-                    if (requireThemeChoice) AppStrings.t("done")
-                    else AppStrings.t("close")
-                )
+
+            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            Text(
+                AppStrings.t("lang_section"),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary
+            )
+            AppLang.entries.forEach { l ->
+                val label = if (l == AppLang.RU) AppStrings.t("lang_ru") else AppStrings.t("lang_en")
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .selectable(
+                            selected = lang == l,
+                            onClick = { onLangSelected(l) },
+                            role = Role.RadioButton
+                        )
+                        .padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(
+                        selected = lang == l,
+                        onClick = { onLangSelected(l) }
+                    )
+                    Text(
+                        label,
+                        modifier = Modifier.padding(start = 8.dp),
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                }
             }
         }
-    )
+    }
 }
