@@ -1,6 +1,10 @@
 # Radio Player (Android)
 Нативное приложение (Kotlin + Jetpack Compose + Media3) для онлайн-радио. Список станций изначально пуст.
 
+<p align="center">
+  <img src="screenshots/Screenshot_20261007-214458~2.jpg" alt="Список радиостанций" width="360" />
+</p>
+
 - minSdk 29 (Android 10), targetSdk/compileSdk 36 (Android 16)
 - Package: `io.github.tytebyte_dev.rplayer`
 - Добавление/редактирование станции: ссылка на поток, название, иконка (URL или файл через SAF)
