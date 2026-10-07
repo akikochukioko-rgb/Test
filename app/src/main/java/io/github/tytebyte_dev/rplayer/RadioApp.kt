@@ -168,10 +168,23 @@ fun RadioApp(
     LaunchedEffect(controller) {
         val c = controller ?: return@LaunchedEffect
         c.addListener(object : Player.Listener {
-            override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
+            override fun onIsPlayingChanged(playing: Boolean) {
+                isPlaying = playing
+                if (playing) {
+                    // Reconnect success: clear soft error and restore highlight from player
+                    error = null
+                    statusMsg = null
+                    c.currentMediaItem?.mediaId?.let { currentId = it }
+                }
+            }
             override fun onPlaybackStateChanged(state: Int) {
                 buffering = state == Player.STATE_BUFFERING
-                if (state == Player.STATE_IDLE || state == Player.STATE_ENDED) {
+                // STATE_IDLE is normal during reconnect/prepare — do not clear currentId
+                // while the user still wants playback (playWhenReady).
+                if (state == Player.STATE_ENDED) {
+                    currentId = null
+                    nowPlaying = null
+                } else if (state == Player.STATE_IDLE && !c.playWhenReady) {
                     currentId = null
                     nowPlaying = null
                 }
@@ -227,12 +240,23 @@ fun RadioApp(
                 }
             }
             override fun onPlayerError(e: PlaybackException) {
-                val station = stations.find { it.id == currentId }
+                val id = currentId ?: c.currentMediaItem?.mediaId
+                val station = stations.find { it.id == id }
                 val info = "station=${station?.name ?: "?"} url=${station?.streamUrl ?: "?"}"
-                error = e.message ?: AppStrings.t("playback_error")
-                currentId = null
-                nowPlaying = null
                 CrashLog.append("PLAYER", "Playback error ($info)", e)
+                // Keep currentId while auto-reconnect may recover (playWhenReady).
+                // Only surface a hard error when user paused/stopped or item is gone.
+                if (c.playWhenReady && id != null) {
+                    currentId = id
+                    nowPlaying = null
+                    error = null
+                    statusMsg = AppStrings.t("reconnecting")
+                } else {
+                    error = e.message ?: AppStrings.t("playback_error")
+                    currentId = null
+                    nowPlaying = null
+                    statusMsg = null
+                }
             }
         })
     }
@@ -372,6 +396,8 @@ fun RadioApp(
                                             if (track.isNullOrBlank()) AppStrings.t("playing")
                                             else AppStrings.t("playing_prefix").format(track)
                                         }
+                                        active && statusMsg == AppStrings.t("reconnecting") ->
+                                            AppStrings.t("reconnecting")
                                         else -> s.streamUrl
                                     }
                                     Text(
