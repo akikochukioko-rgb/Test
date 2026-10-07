@@ -16,14 +16,17 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -48,6 +51,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 
 class MainActivity : ComponentActivity() {
@@ -69,10 +73,12 @@ class MainActivity : ComponentActivity() {
             var themeMode by remember { mutableStateOf(ThemePrefs.load(this@MainActivity)) }
             var lang by remember { mutableStateOf(LangPrefs.load(this@MainActivity)) }
             var langTick by remember { mutableIntStateOf(0) }
-            var showSettings by remember {
+            // Settings only when user opens ⚙ — never forced at startup
+            var showSettings by remember { mutableStateOf(false) }
+            // One-time theme onboarding (full page, not settings)
+            var showOnboarding by remember {
                 mutableStateOf(!ThemePrefs.isChosen(this@MainActivity))
             }
-            val firstRun = remember { !ThemePrefs.isChosen(this@MainActivity) }
 
             val systemDark = isSystemInDarkTheme()
             val useDark = when (themeMode) {
@@ -90,34 +96,41 @@ class MainActivity : ComponentActivity() {
             }
 
             MaterialTheme(colorScheme = scheme) {
-                // Keep RadioApp always composed so MediaController / playback survive
-                // opening Settings. Settings is drawn as a full-screen overlay on top.
-                Box(Modifier.fillMaxSize()) {
-                    RadioApp(
-                        onOpenSettings = { showSettings = true },
-                        langTick = langTick
+                if (showOnboarding) {
+                    ThemeOnboardingScreen(
+                        themeMode = themeMode,
+                        onThemeSelected = { mode ->
+                            themeMode = mode
+                        },
+                        onContinue = {
+                            ThemePrefs.save(this@MainActivity, themeMode)
+                            showOnboarding = false
+                        }
                     )
-                    if (showSettings) {
-                        SettingsScreen(
-                            themeMode = themeMode,
-                            lang = lang,
-                            requireThemeChoice = firstRun && !ThemePrefs.isChosen(this@MainActivity),
-                            onThemeSelected = { mode ->
-                                ThemePrefs.save(this@MainActivity, mode)
-                                themeMode = mode
-                            },
-                            onLangSelected = { l ->
-                                LangPrefs.save(this@MainActivity, l)
-                                AppStrings.lang = l
-                                lang = l
-                                langTick++
-                            },
-                            onBack = {
-                                if (ThemePrefs.isChosen(this@MainActivity)) {
-                                    showSettings = false
-                                }
-                            }
+                } else {
+                    // Keep RadioApp always composed so MediaController / playback survive Settings.
+                    Box(Modifier.fillMaxSize()) {
+                        RadioApp(
+                            onOpenSettings = { showSettings = true },
+                            langTick = langTick
                         )
+                        if (showSettings) {
+                            SettingsScreen(
+                                themeMode = themeMode,
+                                lang = lang,
+                                onThemeSelected = { mode ->
+                                    ThemePrefs.save(this@MainActivity, mode)
+                                    themeMode = mode
+                                },
+                                onLangSelected = { l ->
+                                    LangPrefs.save(this@MainActivity, l)
+                                    AppStrings.lang = l
+                                    lang = l
+                                    langTick++
+                                },
+                                onBack = { showSettings = false }
+                            )
+                        }
                     }
                 }
             }
@@ -155,36 +168,96 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/** One-time full-screen theme picker shown only on first launch. */
+@Composable
+private fun ThemeOnboardingScreen(
+    themeMode: AppThemeMode,
+    onThemeSelected: (AppThemeMode) -> Unit,
+    onContinue: () -> Unit
+) {
+    // Block system back — user must pick a theme and press Continue once
+    BackHandler(enabled = true) { /* no-op */ }
+
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp, vertical = 32.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                AppStrings.t("onboarding_title"),
+                style = MaterialTheme.typography.headlineSmall,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                AppStrings.t("onboarding_subtitle"),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(28.dp))
+
+            AppThemeMode.entries.forEach { mode ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .selectable(
+                            selected = themeMode == mode,
+                            onClick = { onThemeSelected(mode) },
+                            role = Role.RadioButton
+                        )
+                        .padding(vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(
+                        selected = themeMode == mode,
+                        onClick = { onThemeSelected(mode) }
+                    )
+                    Text(
+                        mode.label(),
+                        modifier = Modifier.padding(start = 8.dp),
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(32.dp))
+            Button(
+                onClick = onContinue,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(AppStrings.t("onboarding_continue"))
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SettingsScreen(
     themeMode: AppThemeMode,
     lang: AppLang,
-    requireThemeChoice: Boolean,
     onThemeSelected: (AppThemeMode) -> Unit,
     onLangSelected: (AppLang) -> Unit,
     onBack: () -> Unit
 ) {
-    val ctx = LocalContext.current
-    val canLeave = !requireThemeChoice || ThemePrefs.isChosen(ctx)
+    BackHandler(enabled = true) { onBack() }
 
-    // System back: only leave when theme is chosen (first-run gate)
-    BackHandler(enabled = canLeave) { onBack() }
-
-    // Opaque surface so the list underneath is fully covered
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Scaffold(
             topBar = {
                 TopAppBar(
                     title = { Text(AppStrings.t("settings")) },
                     navigationIcon = {
-                        if (canLeave) {
-                            IconButton(onClick = onBack) {
-                                Icon(
-                                    Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = AppStrings.t("back")
-                                )
-                            }
+                        IconButton(onClick = onBack) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = AppStrings.t("back")
+                            )
                         }
                     }
                 )
