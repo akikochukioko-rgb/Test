@@ -1,3 +1,1 @@
-package io.github.tytebyte_dev.rplayer
-
-// See local patched file - RESTORE IN PROGRESS
+LOAD_FROM_/home/workdir/artifacts/RadioApp.kt
