@@ -1,51 +1,53 @@
 package io.github.tytebyte_dev.rplayer
 
 import android.content.Context
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.ColorScheme
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.platform.LocalContext
-import android.os.Build
 
-enum class AppTheme { SYSTEM, LIGHT, DARK }
+enum class AppThemeMode {
+    SYSTEM,
+    LIGHT,
+    DARK;
 
-object ThemePrefs {
-    private const val PREFS = "theme_prefs"
-    private const val KEY = "theme"
-    private const val FIRST = "theme_chosen"
-
-    fun get(ctx: Context): AppTheme {
-        val name = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString(KEY, AppTheme.SYSTEM.name) ?: AppTheme.SYSTEM.name
-        return runCatching { AppTheme.valueOf(name) }.getOrDefault(AppTheme.SYSTEM)
+    companion object {
+        fun fromKey(key: String?): AppThemeMode = when (key) {
+            "light" -> LIGHT
+            "dark" -> DARK
+            else -> SYSTEM
+        }
     }
 
-    fun set(ctx: Context, theme: AppTheme) {
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putString(KEY, theme.name)
-            .putBoolean(FIRST, true)
-            .apply()
-    }
+    val key: String
+        get() = when (this) {
+            SYSTEM -> "system"
+            LIGHT -> "light"
+            DARK -> "dark"
+        }
 
-    fun isChosen(ctx: Context): Boolean =
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(FIRST, false)
+    fun label(): String = when (this) {
+        SYSTEM -> AppStrings.t("theme_system")
+        LIGHT -> AppStrings.t("theme_light")
+        DARK -> AppStrings.t("theme_dark")
+    }
 }
 
-@Composable
-fun resolveColorScheme(theme: AppTheme): ColorScheme {
-    val dark = when (theme) {
-        AppTheme.SYSTEM -> isSystemInDarkTheme()
-        AppTheme.DARK -> true
-        AppTheme.LIGHT -> false
+object ThemePrefs {
+    private const val PREFS = "appearance"
+    private const val KEY_MODE = "theme_mode"
+    private const val KEY_CHOSEN = "theme_chosen"
+
+    fun isChosen(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_CHOSEN, false)
+
+    fun load(context: Context): AppThemeMode {
+        val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        return AppThemeMode.fromKey(p.getString(KEY_MODE, "system"))
     }
-    val ctx = LocalContext.current
-    return if (Build.VERSION.SDK_INT >= 31) {
-        if (dark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
-    } else {
-        if (dark) darkColorScheme() else lightColorScheme()
+
+    fun save(context: Context, mode: AppThemeMode) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_MODE, mode.key)
+            .putBoolean(KEY_CHOSEN, true)
+            .apply()
     }
 }
