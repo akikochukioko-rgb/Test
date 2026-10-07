@@ -4,8 +4,9 @@ local.properties
 .idea/
 *.iml
 
-# Generated / local keystores — never commit real keys
-app/rplayer-test.keystore
-app/release.keystore
+# Keystores — never commit keys (use GitHub Actions secrets)
 *.keystore
-!app/rplayer-test.keystore.b64
+*.jks
+*.keystore.b64
+app/*.keystore
+app/*.jks

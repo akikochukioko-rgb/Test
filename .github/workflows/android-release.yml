@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag (e.g. v1.9 or 1.9-v2). Leave empty to use build-<run_number>. No spaces."
+        description: "Release tag (e.g. v2.1). Leave empty to use build-<run_number>. No spaces."
         required: false
         type: string
 
@@ -33,25 +33,40 @@ jobs:
         with:
           gradle-version: "8.12"
 
-      # Decode committed keystore (app/rplayer-test.keystore.b64)
-      # KEYSTORE_PASSWORD / KEY_PASSWORD: tytebytedevbsD5gW
-      # KEY_ALIAS: tytebyte-dev
-      - name: Decode keystore
+      # Repository secrets: KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD
+      - name: Decode keystore from secrets
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          KS="$GITHUB_WORKSPACE/app/rplayer-test.keystore"
-          base64 -d "$GITHUB_WORKSPACE/app/rplayer-test.keystore.b64" > "$KS"
+          set -euo pipefail
+          if [ -z "${KEYSTORE_BASE64:-}" ]; then
+            echo "Secret KEYSTORE_BASE64 is not set" >&2
+            exit 1
+          fi
+          if [ -z "${KEYSTORE_PASSWORD:-}" ] || [ -z "${KEY_ALIAS:-}" ] || [ -z "${KEY_PASSWORD:-}" ]; then
+            echo "Secrets KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD must all be set" >&2
+            exit 1
+          fi
+          KS="$GITHUB_WORKSPACE/app/release.keystore"
+          echo "$KEYSTORE_BASE64" | base64 -d > "$KS"
           echo "KEYSTORE_FILE=$KS" >> "$GITHUB_ENV"
-          echo "KEYSTORE_PASSWORD=tytebytedevbsD5gW" >> "$GITHUB_ENV"
-          echo "KEY_ALIAS=tytebyte-dev" >> "$GITHUB_ENV"
-          echo "KEY_PASSWORD=tytebytedevbsD5gW" >> "$GITHUB_ENV"
-          echo "Using keystore: $KS (alias=tytebyte-dev)"
+          echo "KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          echo "KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
+          echo "KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
+          echo "Keystore decoded to $KS (alias=$KEY_ALIAS)"
 
       - name: Build release APK
         run: gradle assembleRelease --no-daemon
 
       - name: Prepare APK artifact name
         id: apk
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
+          set -euo pipefail
           APK=$(ls app/build/outputs/apk/release/*.apk | head -n1)
           if [ -z "$APK" ]; then
             echo "No release APK found" >&2
@@ -59,9 +74,9 @@ jobs:
           fi
           echo "path=$APK" >> "$GITHUB_OUTPUT"
 
-          if [ -n "${{ inputs.tag }}" ]; then
-            # Git tags cannot contain spaces or many special chars
-            TAG=$(echo "${{ inputs.tag }}" | tr ' ' '-' | tr -cd 'A-Za-z0-9._-')
+          if [ -n "${INPUT_TAG:-}" ]; then
+            # Sanitize tag from env (avoid shell injection via workflow input)
+            TAG=$(printf '%s' "$INPUT_TAG" | tr ' ' '-' | tr -cd 'A-Za-z0-9._-')
             if [ -z "$TAG" ]; then
               TAG="build-${{ github.run_number }}"
             fi
@@ -70,7 +85,6 @@ jobs:
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-          # e.g. RadioPlayer-v1.9.apk
           OUT="RadioPlayer-${TAG}.apk"
           cp "$APK" "$OUT"
           echo "upload=$OUT" >> "$GITHUB_OUTPUT"

@@ -1,5 +1,3 @@
-import java.util.Base64
-
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -7,40 +5,33 @@ plugins {
 }
 
 /**
- * Prefer KEYSTORE_FILE + KEYSTORE_PASSWORD / KEY_ALIAS / KEY_PASSWORD from the environment (CI).
- * Fallback: decode app/rplayer-test.keystore.b64 and use tytebyte-dev credentials.
+ * Signing credentials come only from the environment (CI / local):
+ *   KEYSTORE_FILE, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD
  *
  * KEYSTORE_FILE may be absolute, relative to this module (app/), or relative to repo root.
+ * No keystore is committed to the repository.
  */
-fun resolveKeystore(): File {
-    val fromEnv = System.getenv("KEYSTORE_FILE")
-    if (!fromEnv.isNullOrBlank()) {
-        val candidates = listOf(
-            file(fromEnv),                     // as given (absolute or relative to app/)
-            rootProject.file(fromEnv),         // relative to repo root
-            file(fromEnv.removePrefix("app/")) // KEYSTORE_FILE=app/foo.keystore from CI
-        )
-        candidates.firstOrNull { it.exists() }?.let { return it }
-        logger.warn("KEYSTORE_FILE=$fromEnv not found (tried ${candidates.map { it.absolutePath }}); using committed keystore")
-    }
-    val ks = file("rplayer-test.keystore")
-    if (!ks.exists()) {
-        val b64File = file("rplayer-test.keystore.b64")
-        if (b64File.exists()) {
-            val b64 = b64File.readText().replace(Regex("\\s"), "")
-            ks.writeBytes(Base64.getDecoder().decode(b64))
+fun resolveKeystore(): File? {
+    val fromEnv = System.getenv("KEYSTORE_FILE") ?: return null
+    if (fromEnv.isBlank()) return null
+    val candidates = listOf(
+        file(fromEnv),
+        rootProject.file(fromEnv),
+        file(fromEnv.removePrefix("app/"))
+    )
+    return candidates.firstOrNull { it.exists() }.also {
+        if (it == null) {
+            logger.warn("KEYSTORE_FILE=$fromEnv not found (tried ${candidates.map { c -> c.absolutePath }})")
         }
     }
-    return ks
 }
 
-fun envOrDefault(name: String, default: String): String =
-    System.getenv(name)?.takeIf { it.isNotBlank() } ?: default
+fun envRequired(name: String): String =
+    System.getenv(name)?.takeIf { it.isNotBlank() }
+        ?: error("Missing required environment variable: $name")
 
 val signingKeystore = resolveKeystore()
-val storePass = envOrDefault("KEYSTORE_PASSWORD", "tytebytedevbsD5gW")
-val keyAliasEnv = envOrDefault("KEY_ALIAS", "tytebyte-dev")
-val keyPass = envOrDefault("KEY_PASSWORD", "tytebytedevbsD5gW")
+val hasSigning = signingKeystore != null
 
 android {
     // Must match Kotlin source package (io.github.tytebyte_dev.rplayer)
@@ -57,27 +48,28 @@ android {
     }
 
     signingConfigs {
-        create("release") {
-            storeFile = signingKeystore
-            storePassword = storePass
-            keyAlias = keyAliasEnv
-            keyPassword = keyPass
-        }
-        create("test") {
-            storeFile = signingKeystore
-            storePassword = storePass
-            keyAlias = keyAliasEnv
-            keyPassword = keyPass
+        if (hasSigning) {
+            create("release") {
+                storeFile = signingKeystore
+                storePassword = envRequired("KEYSTORE_PASSWORD")
+                keyAlias = envRequired("KEY_ALIAS")
+                keyPassword = envRequired("KEY_PASSWORD")
+            }
         }
     }
 
     buildTypes {
         debug {
-            signingConfig = signingConfigs.getByName("release")
+            // Prefer release keystore when provided (CI); otherwise default debug key
+            if (hasSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("release")
+            if (hasSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
