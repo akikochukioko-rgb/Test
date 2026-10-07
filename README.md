@@ -25,8 +25,16 @@
 Дубликаты по URL при импорте пропускаются.
 
 ## Сборка
-Локально: `gradle assembleDebug` (Gradle 8.12, JDK 17, Android SDK 36)
-GitHub Actions: `.github/workflows/android.yml` — APK в Artifacts.
+Локально: `gradle assembleDebug` (Gradle 8.12, JDK 17, Android SDK 36) — debug-подпись по умолчанию.
+
+GitHub Actions (`.github/workflows/android.yml`, `android-release.yml`) подписывает APK через **Repository secrets**:
+
+| Secret | Описание |
+|--------|----------|
+| `KEYSTORE_BASE64` | Keystore в Base64 (`base64 -w0 release.keystore`) |
+| `KEYSTORE_PASSWORD` | Пароль хранилища |
+| `KEY_ALIAS` | Alias ключа |
+| `KEY_PASSWORD` | Пароль ключа |
 
 ## Лицензия
 
