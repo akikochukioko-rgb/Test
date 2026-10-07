@@ -92,7 +92,7 @@ class PlaybackService : MediaSessionService() {
             .followSslRedirects(true)
             .build()
         return OkHttpDataSource.Factory(client)
-            .setUserAgent("RadioPlayer/1.9 (Android; Media3)")
+            .setUserAgent("RadioPlayer/2.1 (Android; Media3)")
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo) = session
