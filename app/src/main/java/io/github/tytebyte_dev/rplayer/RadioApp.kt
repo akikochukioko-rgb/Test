@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -367,12 +368,22 @@ fun RadioApp(
                                 false
                             }
                         )
+                        // Clip so red delete background never bleeds outside the row
+                        Box(Modifier.clip(RoundedCornerShape(12.dp))) {
                         SwipeToDismissBox(
                             state = dismissState,
                             enableDismissFromStartToEnd = false,
                             enableDismissFromEndToStart = draggingId == null,
                             backgroundContent = {
-                                val color = MaterialTheme.colorScheme.errorContainer
+                                // Only paint while user is swiping left — transparent when settled
+                                val swipingLeft =
+                                    dismissState.targetValue == SwipeToDismissBoxValue.EndToStart ||
+                                        dismissState.dismissDirection == SwipeToDismissBoxValue.EndToStart
+                                val color = if (swipingLeft) {
+                                    MaterialTheme.colorScheme.errorContainer
+                                } else {
+                                    Color.Transparent
+                                }
                                 Box(
                                     Modifier
                                         .fillMaxSize()
@@ -380,11 +391,13 @@ fun RadioApp(
                                         .padding(horizontal = 20.dp),
                                     contentAlignment = Alignment.CenterEnd
                                 ) {
-                                    Icon(
-                                        Icons.Default.Delete,
-                                        contentDescription = AppStrings.t("delete"),
-                                        tint = MaterialTheme.colorScheme.onErrorContainer
-                                    )
+                                    if (swipingLeft) {
+                                        Icon(
+                                            Icons.Default.Delete,
+                                            contentDescription = AppStrings.t("delete"),
+                                            tint = MaterialTheme.colorScheme.onErrorContainer
+                                        )
+                                    }
                                 }
                             }
                         ) {
@@ -431,6 +444,7 @@ fun RadioApp(
                                     )
                                 }
                                 .clickable(enabled = draggingId == null) { playStation(s) },
+                            shape = RoundedCornerShape(12.dp),
                             colors = CardDefaults.cardColors(
                                 containerColor = if (active) MaterialTheme.colorScheme.primaryContainer
                                 else MaterialTheme.colorScheme.surfaceVariant
@@ -494,6 +508,7 @@ fun RadioApp(
                             }
                         }
                         } // SwipeToDismissBox
+                        } // clip Box
                     }
                 }
             }
