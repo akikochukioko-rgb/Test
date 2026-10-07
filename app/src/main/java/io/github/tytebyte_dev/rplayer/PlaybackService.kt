@@ -66,7 +66,7 @@ class SslAwareDataSourceFactory(
 
     fun enablePermissive() {
         if (permissive.compareAndSet(false, true)) {
-            CrashLog.append("SSL", "Permissive SSL enabled after certificate/hostname failure")
+            CrashLog.append("SSL", "Permissive SSL enabled after certificate failure")
         }
     }
 
@@ -79,18 +79,11 @@ class SslAwareDataSourceFactory(
 
     companion object {
         fun isSslError(error: PlaybackException): Boolean {
+            // Only real SSL/certificate types — do NOT match message text
+            // (e.g. UnknownHostException: "No address associated with hostname").
             var t: Throwable? = error
             while (t != null) {
-                when (t) {
-                    is SSLException, is CertificateException -> return true
-                }
-                val msg = t.message.orEmpty()
-                if (msg.contains("SSL", ignoreCase = true) ||
-                    msg.contains("Certificate", ignoreCase = true) ||
-                    msg.contains("Trust anchor", ignoreCase = true) ||
-                    msg.contains("hostname", ignoreCase = true) ||
-                    msg.contains("Cleartext HTTP traffic", ignoreCase = true)
-                ) return true
+                if (t is SSLException || t is CertificateException) return true
                 t = t.cause
             }
             return false
@@ -138,17 +131,13 @@ class PlaybackService : MediaSessionService() {
         player.addListener(StreamMetadataUpdater(player))
         reconnect = ReconnectListener(player).also { player.addListener(it) }
 
-        // Strict SSL first; only after a cert/hostname failure open permissive mode
-        // and let ReconnectListener (or an immediate prepare) recover the stream.
+        // Enable permissive SSL once; ReconnectListener performs the actual retry
+        // (avoid double prepare from this listener + ReconnectListener).
         player.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
                 val f = sslFactory ?: return
                 if (!f.isPermissive && SslAwareDataSourceFactory.isSslError(error)) {
                     f.enablePermissive()
-                    if (player.playWhenReady) {
-                        player.seekToDefaultPosition()
-                        player.prepare()
-                    }
                 }
             }
         })

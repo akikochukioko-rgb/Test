@@ -19,16 +19,24 @@ class StationStore(private val context: Context) {
     private val prefs = context.getSharedPreferences("stations", Context.MODE_PRIVATE)
 
     fun load(): List<Station> {
-        val raw = prefs.getString("list", "[]") ?: "[]"
-        val arr = JSONArray(raw)
-        return (0 until arr.length()).map {
-            val o = arr.getJSONObject(it)
-            Station(
-                o.getString("id"),
-                o.getString("name"),
-                o.getString("url"),
-                if (o.has("icon") && !o.isNull("icon")) o.getString("icon") else null
-            )
+        return try {
+            val raw = prefs.getString("list", "[]") ?: "[]"
+            val arr = JSONArray(raw)
+            (0 until arr.length()).mapNotNull {
+                try {
+                    val o = arr.getJSONObject(it)
+                    Station(
+                        o.getString("id"),
+                        o.getString("name"),
+                        o.getString("url"),
+                        if (o.has("icon") && !o.isNull("icon")) o.getString("icon") else null
+                    )
+                } catch (_: Exception) {
+                    null
+                }
+            }
+        } catch (_: Exception) {
+            emptyList()
         }
     }
 
@@ -47,12 +55,16 @@ class StationStore(private val context: Context) {
     }
 
     /** Export format compatible with mass import:
-     *  { "radio_stations": [ { "name": "...", "url": "..." }, ... ] }
+     *  { "radio_stations": [ { "name": "...", "url": "...", "icon": "https://..."? }, ... ] }
      */
     fun exportToJson(list: List<Station>): String {
         val arr = JSONArray()
         list.forEach {
-            arr.put(JSONObject().put("name", it.name).put("url", it.streamUrl))
+            val o = JSONObject().put("name", it.name).put("url", it.streamUrl)
+            // Only portable http(s) icons — local file paths are device-specific
+            val icon = it.icon
+            if (icon != null && icon.startsWith("http")) o.put("icon", icon)
+            arr.put(o)
         }
         return JSONObject().put("radio_stations", arr).toString(2)
     }
@@ -89,7 +101,9 @@ class StationStore(private val context: Context) {
             }.trim()
             if (name.isEmpty() || url.isEmpty()) continue
             if (!url.startsWith("http://") && !url.startsWith("https://")) continue
-            result += Station(name = name, streamUrl = url)
+            val iconRaw = o.optString("icon").trim()
+            val icon = iconRaw.takeIf { it.startsWith("http://") || it.startsWith("https://") }
+            result += Station(name = name, streamUrl = url, icon = icon)
         }
         return result
     }
