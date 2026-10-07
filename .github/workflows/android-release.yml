@@ -1,0 +1,95 @@
+name: Android Release
+
+on:
+  # Create a release when a version tag is pushed, e.g. v1.9 or v1.9.0
+  push:
+    tags:
+      - "v*"
+  # Or run manually from the Actions tab
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v1.9). Leave empty to use run id."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    # Pin Ubuntu 24.04 until the ubuntu-latest → 26 migration (Oct 19, 2026) is settled
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # v4: Node 24 runtime; does not request the removed "tools" package by default
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools platforms;android-36 build-tools;35.0.0
+
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: "8.12"
+
+      - name: Decode release keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > app/release.keystore
+            echo "KEYSTORE_FILE=app/release.keystore" >> "$GITHUB_ENV"
+            echo "Using GitHub Secrets keystore"
+          else
+            echo "KEYSTORE_BASE64 secret not set — falling back to test keystore"
+          fi
+
+      - name: Build release APK
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: gradle assembleRelease --no-daemon
+
+      - name: Prepare APK artifact name
+        id: apk
+        run: |
+          APK=$(ls app/build/outputs/apk/release/*.apk | head -n1)
+          if [ -z "$APK" ]; then
+            echo "No release APK found" >&2
+            exit 1
+          fi
+          echo "path=$APK" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.tag }}" ]; then
+            TAG="${{ inputs.tag }}"
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG="build-${{ github.run_number }}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+          # e.g. RadioPlayer-v1.9.apk
+          BASE=$(basename "$APK" .apk)
+          OUT="RadioPlayer-${TAG}.apk"
+          cp "$APK" "$OUT"
+          echo "upload=$OUT" >> "$GITHUB_OUTPUT"
+          echo "Prepared $OUT from $APK (tag=$TAG)"
+
+      - name: Create GitHub Release and upload APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.apk.outputs.tag }}
+          name: Rplayer ${{ steps.apk.outputs.tag }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: ${{ steps.apk.outputs.upload }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
