@@ -45,6 +45,7 @@ object AppStrings {
     private val ru = mapOf(
         "app_title" to "Радио",
         "settings" to "Настройки",
+        "back" to "Назад",
         "theme_section" to "Тема оформления",
         "theme_hint" to "Можно сменить в любой момент через иконку ⚙",
         "theme_system" to "Как в системе",
@@ -95,6 +96,7 @@ object AppStrings {
     private val en = mapOf(
         "app_title" to "Radio",
         "settings" to "Settings",
+        "back" to "Back",
         "theme_section" to "Theme",
         "theme_hint" to "You can change this anytime via the ⚙ icon",
         "theme_system" to "System default",
