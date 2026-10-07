@@ -9,12 +9,19 @@ plugins {
 /**
  * Prefer CI secrets (KEYSTORE_BASE64 + passwords).
  * Fallback: committed test keystore for local debug builds.
+ *
+ * KEYSTORE_FILE may be absolute, relative to this module (app/), or relative to repo root.
  */
 fun resolveKeystore(): File {
     val fromEnv = System.getenv("KEYSTORE_FILE")
     if (!fromEnv.isNullOrBlank()) {
-        val f = file(fromEnv)
-        if (f.exists()) return f
+        val candidates = listOf(
+            file(fromEnv),                    // as given (absolute or relative to app/)
+            rootProject.file(fromEnv),        // relative to repo root
+            file(fromEnv.removePrefix("app/")) // KEYSTORE_FILE=app/foo.keystore from CI
+        )
+        candidates.firstOrNull { it.exists() }?.let { return it }
+        logger.warn("KEYSTORE_FILE=$fromEnv not found (tried ${candidates.map { it.absolutePath }}); using test keystore")
     }
     val ks = file("rplayer-test.keystore")
     if (!ks.exists()) {
