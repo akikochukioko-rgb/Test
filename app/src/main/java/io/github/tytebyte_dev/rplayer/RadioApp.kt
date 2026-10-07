@@ -31,8 +31,11 @@ import androidx.core.content.ContextCompat
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.Metadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.extractor.metadata.icy.IcyInfo
+import androidx.media3.extractor.metadata.id3.TextInformationFrame
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import coil.compose.AsyncImage
@@ -46,9 +49,11 @@ private fun iconModel(icon: String?): Any? =
     }
 
 private fun stationMediaItem(s: Station): MediaItem {
+    // Station name only for notification / media session identity.
+    // Do NOT set artist — that produced the fake "Radio — StationName" now-playing line.
+    // Live ICY / ID3 metadata will update MediaMetadata while playing.
     val meta = MediaMetadata.Builder()
         .setTitle(s.name)
-        .setArtist("Radio")
         .setIsBrowsable(false)
         .setIsPlayable(true)
         .apply {
@@ -69,28 +74,16 @@ private fun formatNowPlaying(meta: MediaMetadata, stationName: String?): String?
     fun CharSequence?.clean(): String =
         this?.toString()?.replace("\u0000", "")?.trim()?.takeIf { it.isNotEmpty() } ?: ""
 
-    val title = meta.title.clean().ifEmpty { meta.displayTitle.clean() }
-    val artist = meta.artist.clean().ifEmpty { meta.albumArtist.clean() }
-    val subtitle = meta.subtitle.clean()
-    val description = meta.description.clean()
-    val writer = meta.writer.clean()
-    val composer = meta.composer.clean()
-    val genre = meta.genre.clean()
-    val album = meta.albumTitle.clean()
-
-    val extras = meta.extras
-    val icyKeys = listOf(
-        "StreamTitle", "streamtitle", "icy-title", "icy_title",
-        "TITLE", "METADATA_KEY_TITLE", "com.google.android.exoplayer.metadata",
-        "icy-name", "icy-description", "StreamUrl"
-    )
-    val fromExtras = icyKeys.mapNotNull { k ->
-        extras?.getString(k)?.trim()?.takeIf { it.isNotEmpty() }
-    }.firstOrNull()
-
     fun looksLikeStation(s: String): Boolean {
-        if (stationName != null && s.equals(stationName, ignoreCase = true)) return true
-        if (s.equals("Radio", ignoreCase = true)) return true
+        val t = s.trim()
+        if (t.isEmpty()) return true
+        if (t.equals("Radio", ignoreCase = true)) return true
+        if (stationName != null) {
+            if (t.equals(stationName, ignoreCase = true)) return true
+            // Reject our old placeholder "Radio — StationName"
+            if (t.equals("Radio — $stationName", ignoreCase = true)) return true
+            if (t.equals("Radio - $stationName", ignoreCase = true)) return true
+        }
         return false
     }
 
@@ -103,29 +96,49 @@ private fun formatNowPlaying(meta: MediaMetadata, stationName: String?): String?
             val a = parts[0].trim()
             val b = parts[1].trim()
             if (a.isNotEmpty() && b.isNotEmpty() && !a.equals(b, ignoreCase = true)) {
+                if (looksLikeStation(a) && !looksLikeStation(b)) return b
+                if (looksLikeStation(b) && !looksLikeStation(a)) return a
                 return "$a — $b"
             }
         }
         return t
     }
 
-    val combined = when {
-        artist.isNotEmpty() && title.isNotEmpty() &&
-            !title.equals(artist, ignoreCase = true) -> "$artist — $title"
-        title.isNotEmpty() -> title
-        artist.isNotEmpty() -> artist
-        fromExtras != null -> parseCombined(fromExtras)
-        subtitle.isNotEmpty() -> subtitle
-        description.isNotEmpty() -> parseCombined(description)
-        writer.isNotEmpty() -> writer
-        composer.isNotEmpty() -> composer
-        album.isNotEmpty() -> album
-        genre.isNotEmpty() -> genre
-        else -> null
-    }?.let { parseCombined(it) ?: it }
+    // 1) Prefer live ICY / stream extras (actual track from the live stream)
+    val extras = meta.extras
+    val icyKeys = listOf(
+        "StreamTitle", "streamtitle", "icy-title", "icy_title",
+        "TITLE", "METADATA_KEY_TITLE",
+        "Icy-Title", "ICY-TITLE"
+    )
+    val fromExtras = icyKeys.mapNotNull { k ->
+        extras?.getString(k)?.trim()?.takeIf { it.isNotEmpty() }
+    }.firstOrNull()
+    fromExtras?.let { parseCombined(it) }?.let { return it }
 
-    if (combined.isNullOrBlank() || looksLikeStation(combined)) return null
-    return combined
+    val title = meta.title.clean().ifEmpty { meta.displayTitle.clean() }
+    val artist = meta.artist.clean().ifEmpty { meta.albumArtist.clean() }
+    val subtitle = meta.subtitle.clean()
+    val description = meta.description.clean()
+
+    // 2) Ignore static station placeholders (title == station name, artist empty/"Radio")
+    val titleIsStation = looksLikeStation(title)
+    val artistIsPlaceholder = artist.isEmpty() || looksLikeStation(artist)
+
+    if (!titleIsStation && title.isNotEmpty()) {
+        if (!artistIsPlaceholder && !title.equals(artist, ignoreCase = true)) {
+            parseCombined("$artist — $title")?.let { return it }
+        }
+        parseCombined(title)?.let { return it }
+    }
+
+    // 3) Other fields that some servers put track info into
+    for (candidate in listOf(subtitle, description, meta.writer.clean(), meta.composer.clean(), meta.albumTitle.clean())) {
+        if (candidate.isNotEmpty() && !looksLikeStation(candidate)) {
+            parseCombined(candidate)?.let { return it }
+        }
+    }
+    return null
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -205,15 +218,58 @@ fun RadioApp(
             }
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 currentId = mediaItem?.mediaId
+                // Clear until live ICY/ID3 metadata arrives — do not show station name as track
                 nowPlaying = null
-                mediaItem?.mediaMetadata?.let { meta ->
-                    val stationName = stations.find { it.id == currentId }?.name
-                    nowPlaying = formatNowPlaying(meta, stationName)
-                }
             }
             override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
                 val stationName = stations.find { it.id == currentId }?.name
-                nowPlaying = formatNowPlaying(mediaMetadata, stationName)
+                val formatted = formatNowPlaying(mediaMetadata, stationName)
+                // Only update when we have real track info; keep previous live title otherwise
+                if (formatted != null) nowPlaying = formatted
+            }
+            override fun onMetadata(metadata: Metadata) {
+                // Raw ICY / ID3 frames from the live stream (most reliable for track title)
+                val stationName = stations.find { it.id == currentId }?.name
+                for (i in 0 until metadata.length()) {
+                    when (val entry = metadata.get(i)) {
+                        is IcyInfo -> {
+                            val t = entry.title?.trim().orEmpty()
+                            if (t.isNotEmpty()) {
+                                val formatted = formatNowPlaying(
+                                    MediaMetadata.Builder().setTitle(t).build(),
+                                    stationName
+                                )
+                                if (formatted != null) {
+                                    nowPlaying = formatted
+                                    return
+                                }
+                            }
+                        }
+                        is TextInformationFrame -> {
+                            // TIT2 = title, TPE1 = artist (some Shoutcast/Icecast via ID3)
+                            val id = entry.id
+                            val values = entry.values
+                            if (values.isEmpty()) continue
+                            if (id == "TIT2" || id == "TT2") {
+                                val t = values[0].trim()
+                                if (t.isNotEmpty()) {
+                                    val formatted = formatNowPlaying(
+                                        MediaMetadata.Builder().setTitle(t).build(),
+                                        stationName
+                                    )
+                                    if (formatted != null) nowPlaying = formatted
+                                }
+                            } else if (id == "TPE1" || id == "TP1") {
+                                val a = values[0].trim()
+                                val cur = nowPlaying
+                                // If we only have title, prepend artist
+                                if (a.isNotEmpty() && !cur.isNullOrBlank() && !cur.contains(a)) {
+                                    nowPlaying = "$a — $cur"
+                                }
+                            }
+                        }
+                    }
+                }
             }
             override fun onPlayerError(e: PlaybackException) {
                 val station = stations.find { it.id == currentId }
@@ -417,87 +473,4 @@ fun RadioApp(
             }
         )
     }
-}
-
-@Composable
-private fun StationDialog(
-    initial: Station?,
-    store: StationStore,
-    onDismiss: () -> Unit,
-    onSave: (Station) -> Unit
-) {
-    var name by remember { mutableStateOf(initial?.name ?: "") }
-    var url by remember { mutableStateOf(initial?.streamUrl ?: "") }
-    var icon by remember { mutableStateOf(initial?.icon) }
-    var iconUrl by remember {
-        mutableStateOf(initial?.icon?.takeIf { it.startsWith("http") } ?: "")
-    }
-    val oldIcon = initial?.icon
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) store.importIcon(uri)?.let { icon = it; iconUrl = "" }
-    }
-    val valid = url.trim().let { it.startsWith("http://") || it.startsWith("https://") }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(
-                if (initial == null) AppStrings.t("new_station")
-                else AppStrings.t("edit_station")
-            )
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    name, { name = it },
-                    label = { Text(AppStrings.t("name")) },
-                    singleLine = true
-                )
-                OutlinedTextField(
-                    url, { url = it },
-                    label = { Text(AppStrings.t("stream_url")) },
-                    singleLine = true,
-                    isError = url.isNotBlank() && !valid
-                )
-                OutlinedTextField(
-                    iconUrl,
-                    { iconUrl = it; icon = it.trim().ifBlank { null } },
-                    label = { Text(AppStrings.t("icon_url")) },
-                    singleLine = true
-                )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedButton(onClick = { picker.launch("image/*") }) {
-                        Text(AppStrings.t("pick_file"))
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    iconModel(icon)?.let {
-                        AsyncImage(
-                            it, null,
-                            Modifier.size(48.dp).clip(RoundedCornerShape(10.dp)),
-                            contentScale = ContentScale.Crop
-                        )
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                enabled = valid,
-                onClick = {
-                    if (oldIcon != null && oldIcon != icon) store.deleteIconFile(oldIcon)
-                    onSave(
-                        Station(
-                            id = initial?.id ?: java.util.UUID.randomUUID().toString(),
-                            name = name.trim().ifBlank { url.trim() },
-                            streamUrl = url.trim(),
-                            icon = icon
-                        )
-                    )
-                }
-            ) { Text(AppStrings.t("save")) }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(AppStrings.t("cancel")) }
-        }
-    )
 }
